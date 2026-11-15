@@ -19,6 +19,19 @@ O APK debug fica em `android/app/build/outputs/apk/debug/app-debug.apk`. No GitH
 
 Na execução manual do workflow, a opção `build_release` gera também o APK release. Para assiná-lo, configure os Secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` e `ANDROID_KEY_PASSWORD`. Sem esses Secrets, o Gradle gera o release sem assinatura; nenhuma chave é armazenada no repositório.
 
+### Conectar a um repositório GitHub e distribuir
+
+O checkout local contém o commit inicial, mas não possui um remoto por padrão. Em um repositório vazio autorizado, execute:
+
+```bash
+git remote add origin https://github.com/USUARIO/REPOSITORIO.git
+git push -u origin master
+```
+
+Depois do push, abra a aba **Actions**, aguarde o workflow `Android APK` e baixe o artifact `sms-vivo-debug-apk`. Para uma distribuição recorrente, use uma GitHub Release e anexe o APK gerado; no WordPress, publique um botão apontando para a URL da Release. Não envie o APK como anexo do Gmail nem desative filtros de upload.
+
+Para um release assinado, execute o workflow manualmente com `build_release=true` depois de configurar os quatro Secrets de keystore. O APK debug é apropriado para homologação privada; o release unsigned não é instalável como versão final.
+
 ## Arquitetura
 
 React/TypeScript é a camada de apresentação. A fonte de verdade dos contatos e da fila é o Room nativo (`sms-vivo.db`); a ponte Capacitor apenas chama operações nativas. `SmsResultReceiver` persiste confirmações do Android mesmo quando a WebView não está aberta. A fila usa estados `PENDING`, `PROCESSING`, `SENT`, `DELIVERED`, `FAILED`, `UNKNOWN`, `CANCELLED` e `SKIPPED`. Itens em `PROCESSING` recuperados após encerramento são marcados como `UNKNOWN`, sem reenvio automático.

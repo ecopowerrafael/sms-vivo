@@ -1,0 +1,52 @@
+name: Android APK
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      build_release:
+        description: Build the optional release APK
+        required: false
+        type: boolean
+        default: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx cap sync android
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: android-actions/setup-android@v3
+      - run: chmod +x android/gradlew && android/gradlew -p android assembleDebug
+      - uses: actions/upload-artifact@v4
+        with: { name: sms-vivo-debug-apk, path: android/app/build/outputs/apk/debug/app-debug.apk }
+      - name: Prepare optional release keystore
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+        shell: bash
+        run: |
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > android/release.keystore
+          else
+            echo "ANDROID_KEYSTORE_BASE64 not configured; building unsigned release"
+          fi
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      - name: Build optional release APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+        run: android/gradlew -p android assembleRelease
+        env:
+          SMS_VIVO_KEYSTORE_PATH: ${{ github.workspace }}/android/release.keystore
+          SMS_VIVO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SMS_VIVO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SMS_VIVO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Upload optional release APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+        uses: actions/upload-artifact@v4
+        with: { name: sms-vivo-release-apk, path: android/app/build/outputs/apk/release/*.apk }

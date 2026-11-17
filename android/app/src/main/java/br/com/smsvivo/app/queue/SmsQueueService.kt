@@ -21,25 +21,35 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 class SmsQueueService : Service() {
-    companion object { const val ACTION_START = "br.com.smsvivo.app.queue.START"; const val ACTION_PAUSE = "br.com.smsvivo.app.queue.PAUSE"; const val ACTION_STOP = "br.com.smsvivo.app.queue.STOP"; private const val CHANNEL = "sms_queue"; private const val NOTIFICATION_ID = 4101 }
-    private val running = AtomicBoolean(false); private val paused = AtomicBoolean(false); private val executor = Executors.newSingleThreadExecutor(); private val database by lazy { SmsDatabase.get(this) }
+    companion object { const val ACTION_START = "br.com.smsvivo.app.queue.START"; const val ACTION_PAUSE = "br.com.smsvivo.app.queue.PAUSE"; const val ACTION_STOP = "br.com.smsvivo.app.queue.STOP"; private const val CHANNEL = "sms_queue"; private const val NOTIFICATION_ID = 4101; val isActive = AtomicBoolean(false) }
+    private val running = AtomicBoolean(false); private val paused = AtomicBoolean(false); private val normalStop = AtomicBoolean(false); private val executor = Executors.newSingleThreadExecutor(); private val database by lazy { SmsDatabase.get(this) }
     private var intervalMs: Long = 0; private var batchSize: Int = 0; private var pendingCount = 0; private var processedCount = 0
-    override fun onCreate() { super.onCreate(); createChannel() }
+    override fun onCreate() { super.onCreate(); isActive.set(true); createChannel() }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.hasExtra("intervalMs") == true) intervalMs = intent.getLongExtra("intervalMs", 0)
         if (intent?.hasExtra("batchSize") == true) batchSize = intent.getIntExtra("batchSize", 0).coerceAtLeast(0)
-        when (intent?.action) { ACTION_PAUSE -> paused.set(true); ACTION_STOP -> { paused.set(true); executor.execute { database.queue().cancelPending(); refreshNotificationCounts(); stopSelf() }; return START_NOT_STICKY }; else -> startProcessing() }
+        when (intent?.action) { ACTION_PAUSE -> paused.set(true); ACTION_STOP -> { normalStop.set(true); paused.set(true); executor.execute { database.queue().cancelPending(); refreshNotificationCounts(); stopSelf() }; return START_NOT_STICKY }; else -> startProcessing() }
         updateNotification(); return START_STICKY
     }
     private fun startProcessing() {
         if (running.getAndSet(true)) { paused.set(false); return }
-        paused.set(false)
+        paused.set(false); normalStop.set(false)
         val type = if (Build.VERSION.SDK_INT >= 34) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(), type) else startForeground(NOTIFICATION_ID, notification())
         executor.execute {
-            try { var processed = 0; refreshNotificationCounts(); while (!paused.get() && (batchSize <= 0 || processed < batchSize)) { val item = database.queue().claimNextPending(System.currentTimeMillis()) ?: break; sendItem(item); processed += 1; refreshNotificationCounts(); if (intervalMs > 0) Thread.sleep(intervalMs) } }
+            try { val processedByCampaign = mutableMapOf<Long, Int>(); var processed = 0; refreshNotificationCounts(); while (!paused.get() && (batchSize <= 0 || processed < batchSize)) { val item = claimNextEligible(processedByCampaign) ?: break; sendItem(item); item.campaignId?.let { processedByCampaign[it] = (processedByCampaign[it] ?: 0) + 1 }; processed += 1; refreshNotificationCounts(); val waitMs = item.campaignId?.let { database.campaigns().find(it)?.intervalMs } ?: intervalMs; if (waitMs > 0) Thread.sleep(waitMs) } }
             finally { running.set(false); if (!paused.get()) stopSelf() }
         }
+    }
+    private fun claimNextEligible(processedByCampaign: MutableMap<Long, Int>): QueueItemEntity? {
+        val queue = database.queue()
+        for (candidate in queue.pending()) {
+            val campaign = candidate.campaignId?.let { database.campaigns().find(it) }
+            val cap = campaign?.batchSize?.takeIf { it > 0 } ?: batchSize
+            if (candidate.campaignId != null && cap > 0 && (processedByCampaign[candidate.campaignId] ?: 0) >= cap) continue
+            if (queue.claimPending(candidate.id, System.currentTimeMillis()) == 1) return queue.byRequestId(candidate.requestId)
+        }
+        return null
     }
     private fun sendItem(item: QueueItemEntity) {
         try {
@@ -47,9 +57,9 @@ class SmsQueueService : Service() {
             if (!active) throw IllegalStateException("SIM selecionado não está ativo")
             val sms = getSystemService(SmsManager::class.java).createForSubscriptionId(item.subscriptionId)
             val parts = sms.divideMessage(item.body)
-            val sent = PendingIntent.getBroadcast(this, item.requestId.hashCode(), Intent(this, SmsResultReceiver::class.java).setAction(SmsResultReceiver.ACTION_SENT).putExtra("requestId", item.requestId), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            val delivered = PendingIntent.getBroadcast(this, item.requestId.hashCode() + 1, Intent(this, SmsResultReceiver::class.java).setAction(SmsResultReceiver.ACTION_DELIVERED).putExtra("requestId", item.requestId), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            if (parts.size == 1) sms.sendTextMessage(item.destination, null, item.body, sent, delivered) else sms.sendMultipartTextMessage(item.destination, null, parts, ArrayList(List(parts.size) { sent }), ArrayList(List(parts.size) { delivered }))
+            database.queue().update(item.copy(partsExpected = parts.size))
+            fun callback(action: String, partIndex: Int, offset: Int): PendingIntent = PendingIntent.getBroadcast(this, item.requestId.hashCode() * 31 + partIndex * 2 + offset, Intent(this, SmsResultReceiver::class.java).setAction(action).putExtra("requestId", item.requestId).putExtra("partIndex", partIndex), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            if (parts.size == 1) sms.sendTextMessage(item.destination, null, item.body, callback(SmsResultReceiver.ACTION_SENT, 0, 0), callback(SmsResultReceiver.ACTION_DELIVERED, 0, 1)) else sms.sendMultipartTextMessage(item.destination, null, parts, ArrayList(parts.indices.map { callback(SmsResultReceiver.ACTION_SENT, it, 0) }), ArrayList(parts.indices.map { callback(SmsResultReceiver.ACTION_DELIVERED, it, 1) }))
         }
         catch (error: Exception) { database.queue().markResult(item.requestId, QueueStates.FAILED, -1, error.message, System.currentTimeMillis()) }
     }
@@ -58,5 +68,5 @@ class SmsQueueService : Service() {
     private fun refreshNotificationCounts() { val q = database.queue(); val total = q.total(); pendingCount = q.count(QueueStates.PENDING); processedCount = total - pendingCount - q.count(QueueStates.PROCESSING); updateNotification() }
     private fun updateNotification() { if (running.get()) getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification()) }
     override fun onBind(intent: Intent?): IBinder? = null
-    override fun onDestroy() { paused.set(true); executor.shutdownNow(); super.onDestroy() }
+    override fun onDestroy() { if (running.get() && !normalStop.get()) database.queue().recoverProcessing(); isActive.set(false); paused.set(true); executor.shutdownNow(); super.onDestroy() }
 }

@@ -6,6 +6,8 @@ import android.content.Intent
 import br.com.smsvivo.app.database.QueueStates
 import br.com.smsvivo.app.database.SmsDatabase
 import br.com.smsvivo.app.database.DiagnosticEventEntity
+import br.com.smsvivo.app.database.SmsPartCallbackEntity
+import br.com.smsvivo.app.database.SmsResultPhase
 
 class SmsResultReceiver : BroadcastReceiver() {
     companion object {
@@ -24,12 +26,10 @@ class SmsResultReceiver : BroadcastReceiver() {
                 val now = System.currentTimeMillis()
                 val queue = database.queue()
                 val item = queue.byRequestId(requestId) ?: return@Thread
-                val finalState = if (state == QueueStates.DELIVERED) {
-                    queue.markDeliveredPart(requestId, now)
-                    queue.byRequestId(requestId)?.state
-                } else if (state == QueueStates.SENT) {
-                    queue.markSentPart(requestId, now)
-                    queue.byRequestId(requestId)?.state
+                val partIndex = intent.getIntExtra("partIndex", 0).coerceAtLeast(0)
+                val finalState = if (state == QueueStates.DELIVERED || state == QueueStates.SENT) {
+                    val phase = if (state == QueueStates.DELIVERED) SmsResultPhase.DELIVERED else SmsResultPhase.SENT
+                    database.recordPartCallback(SmsPartCallbackEntity(requestId, partIndex, phase, code, now))?.state
                 } else {
                     queue.markResult(requestId, state, code, "Código Android $code", now)
                     state

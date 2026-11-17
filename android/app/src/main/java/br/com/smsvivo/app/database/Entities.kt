@@ -27,6 +27,9 @@ data class MessageTemplateEntity(@PrimaryKey(autoGenerate = true) val id: Long =
 @Entity(tableName = "queue_items", indices = [Index(value = ["requestId"], unique = true), Index(value = ["state"]), Index(value = ["campaignId"])])
 data class QueueItemEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val requestId: String, val campaignId: Long? = null, val contactId: Long? = null, val destination: String, val body: String, val subscriptionId: Int, val state: String = QueueStates.PENDING, val createdAt: Long = System.currentTimeMillis(), val processingAt: Long? = null, val sentAt: Long? = null, val deliveredAt: Long? = null, val failureCode: Int? = null, val failureMessage: String? = null, val attemptCount: Int = 0, val partsExpected: Int = 1, val sentParts: Int = 0, val deliveredParts: Int = 0)
 
+@Entity(tableName = "sms_part_callbacks", primaryKeys = ["requestId", "partIndex", "phase"], indices = [Index(value = ["requestId"])])
+data class SmsPartCallbackEntity(val requestId: String, val partIndex: Int, val phase: String, val resultCode: Int, val createdAt: Long = System.currentTimeMillis())
+
 @Entity(tableName = "send_attempts", indices = [Index(value = ["queueItemId"])])
 data class SendAttemptEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val queueItemId: Long, val attemptNumber: Int, val startedAt: Long, val finishedAt: Long? = null, val state: String, val resultCode: Int? = null, val errorMessage: String? = null)
 

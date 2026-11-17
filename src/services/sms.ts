@@ -28,7 +28,7 @@ export interface SmsNativePlugin {
   createCampaign(options: { name: string; subscriptionId: number; intervalMs?: number; batchSize?: number; listId?: number; templateId?: number }): Promise<{ id: number }>;
 }
 
-export interface ContactRecord { id: number; name: string; phone: string; normalizedPhone: string; company?: string; city?: string; state?: string; authorized: boolean; unsubscribed: boolean; }
+export interface ContactRecord { id: number; name: string; phone: string; normalizedPhone: string; company?: string; city?: string; state?: string; customFieldsJson?: string; authorized: boolean; unsubscribed: boolean; }
 export interface ContactListRecord { id: number; name: string; description?: string; contactIds: number[]; }
 export interface MessageTemplateRecord { id: number; name: string; body: string; }
 export interface CampaignRecord { id: number; name: string; state: string; subscriptionId: number; listId?: number; createdAt: number; }

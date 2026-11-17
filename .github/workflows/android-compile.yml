@@ -2,7 +2,7 @@ name: Android source compile
 
 on:
   push:
-    branches: [codex/refactor-mobile-ui]
+    branches: [codex/refactor-mobile-ui, codex/stage2-robustness]
   workflow_dispatch:
 
 jobs:

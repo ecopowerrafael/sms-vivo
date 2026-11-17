@@ -24,8 +24,9 @@ interface QueueDao {
     @Update fun update(item: QueueItemEntity)
     @Query("SELECT * FROM queue_items WHERE requestId = :requestId LIMIT 1") fun byRequestId(requestId: String): QueueItemEntity?
     @Query("SELECT * FROM queue_items WHERE state = :state ORDER BY createdAt, id") fun byState(state: String): List<QueueItemEntity>
-    @Query("SELECT * FROM queue_items WHERE state = 'PENDING' ORDER BY createdAt, id LIMIT 1") fun nextPending(): QueueItemEntity?
-    @Transaction fun claimNextPending(now: Long): QueueItemEntity? { val item = nextPending() ?: return null; val processing = item.copy(state = QueueStates.PROCESSING, processingAt = now, attemptCount = item.attemptCount + 1); update(processing); return processing }
+    @Query("SELECT * FROM queue_items WHERE state = 'PENDING' ORDER BY createdAt, id") fun pending(): List<QueueItemEntity>
+    @Query("UPDATE queue_items SET state = 'PROCESSING', processingAt = :now, attemptCount = attemptCount + 1 WHERE id = :id AND state = 'PENDING'") fun claimPending(id: Long, now: Long): Int
+    @Transaction fun claimNextPending(now: Long): QueueItemEntity? { val item = pending().firstOrNull() ?: return null; return if (claimPending(item.id, now) == 1) byRequestId(item.requestId) else null }
     @Query("SELECT COUNT(*) FROM queue_items WHERE state = :state") fun count(state: String): Int
     @Query("SELECT COUNT(*) FROM queue_items") fun total(): Int
     @Query("SELECT MIN(createdAt) FROM queue_items") fun firstCreatedAt(): Long?
@@ -34,10 +35,15 @@ interface QueueDao {
     @Query("SELECT * FROM queue_items ORDER BY createdAt DESC") fun allHistory(): List<QueueItemEntity>
     @Query("UPDATE queue_items SET state = 'UNKNOWN', failureMessage = 'Processo interrompido antes da confirmação; revisão manual necessária' WHERE state = 'PROCESSING'") fun recoverProcessing(): Int
     @Query("UPDATE queue_items SET state = :state, failureCode = :code, failureMessage = :message, sentAt = :sentAt WHERE requestId = :requestId") fun markResult(requestId: String, state: String, code: Int?, message: String?, sentAt: Long?)
-    @Query("UPDATE queue_items SET sentParts = sentParts + 1, state = CASE WHEN sentParts + 1 >= partsExpected THEN 'SENT' ELSE state END, sentAt = CASE WHEN sentParts + 1 >= partsExpected THEN :at ELSE sentAt END WHERE requestId = :requestId AND state NOT IN ('FAILED', 'UNKNOWN', 'CANCELLED')") fun markSentPart(requestId: String, at: Long): Int
-    @Query("UPDATE queue_items SET deliveredParts = deliveredParts + 1, state = CASE WHEN deliveredParts + 1 >= partsExpected THEN 'DELIVERED' ELSE state END, deliveredAt = CASE WHEN deliveredParts + 1 >= partsExpected THEN :at ELSE deliveredAt END WHERE requestId = :requestId AND state NOT IN ('FAILED', 'UNKNOWN', 'CANCELLED')") fun markDeliveredPart(requestId: String, at: Long): Int
+    @Query("UPDATE queue_items SET sentParts = sentParts + 1, state = CASE WHEN sentParts + 1 >= partsExpected THEN 'SENT' ELSE state END, sentAt = CASE WHEN sentParts + 1 >= partsExpected THEN :at ELSE sentAt END WHERE requestId = :requestId AND state NOT IN ('FAILED', 'UNKNOWN', 'CANCELLED', 'DELIVERED')") fun markSentPart(requestId: String, at: Long): Int
+    @Query("UPDATE queue_items SET deliveredParts = deliveredParts + 1, state = CASE WHEN deliveredParts + 1 >= partsExpected AND sentParts >= partsExpected THEN 'DELIVERED' ELSE state END, deliveredAt = CASE WHEN deliveredParts + 1 >= partsExpected AND sentParts >= partsExpected THEN :at ELSE deliveredAt END WHERE requestId = :requestId AND state NOT IN ('FAILED', 'UNKNOWN', 'CANCELLED')") fun markDeliveredPart(requestId: String, at: Long): Int
     @Query("UPDATE queue_items SET state = 'DELIVERED', deliveredAt = :at WHERE requestId = :requestId") fun markDelivered(requestId: String, at: Long)
     @Query("UPDATE queue_items SET state = 'CANCELLED', failureMessage = 'Cancelado pelo usuário' WHERE state = 'PENDING'") fun cancelPending(): Int
+}
+
+@Dao
+interface SmsPartCallbackDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE) fun insert(callback: SmsPartCallbackEntity): Long
 }
 
 @Dao

@@ -27,6 +27,9 @@ import br.com.smsvivo.app.database.ContactListEntity
 import br.com.smsvivo.app.database.ContactListMembershipEntity
 import br.com.smsvivo.app.database.MessageTemplateEntity
 import br.com.smsvivo.app.database.CampaignEntity
+import br.com.smsvivo.app.database.ContactPatch
+import br.com.smsvivo.app.database.mergeContact
+import br.com.smsvivo.app.database.SmsResultPhase
 import br.com.smsvivo.app.receivers.SmsResultReceiver
 import br.com.smsvivo.app.queue.SmsQueueService
 import java.util.UUID
@@ -52,7 +55,7 @@ class SmsPlugin : Plugin() {
 
     override fun load() {
         super.load()
-        Thread { database.queue().recoverProcessing() }.start()
+        if (!SmsQueueService.isActive.get()) Thread { database.queue().recoverProcessing() }.start()
         val filter = IntentFilter(ACTION_RESULT)
         if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED) else @Suppress("DEPRECATION") context.registerReceiver(receiver, filter)
     }
@@ -78,7 +81,7 @@ class SmsPlugin : Plugin() {
     @PluginMethod fun requestNotificationPermission(call: PluginCall) { requestPermissionForAlias("notifications", call, "notificationPermission") }
 
     @PluginMethod fun listContacts(call: PluginCall) {
-        Thread { val array = org.json.JSONArray(); database.contacts().all().forEach { c -> array.put(JSObject().apply { put("id", c.id); put("name", c.name); put("phone", c.phone); put("normalizedPhone", c.normalizedPhone); put("company", c.company); put("city", c.city); put("state", c.state); put("authorized", c.authorized); put("unsubscribed", c.unsubscribed) }) }; call.resolve(JSObject().apply { put("contacts", array) }) }.start()
+        Thread { val array = org.json.JSONArray(); database.contacts().all().forEach { c -> array.put(JSObject().apply { put("id", c.id); put("name", c.name); put("phone", c.phone); put("normalizedPhone", c.normalizedPhone); put("company", c.company); put("city", c.city); put("state", c.state); put("customFieldsJson", c.customFieldsJson); put("authorized", c.authorized); put("unsubscribed", c.unsubscribed) }) }; call.resolve(JSObject().apply { put("contacts", array) }) }.start()
     }
 
     @PluginMethod fun listContactLists(call: PluginCall) { Thread { val lists = org.json.JSONArray(); database.lists().all().forEach { list -> lists.put(JSObject().apply { put("id", list.id); put("name", list.name); put("description", list.description); put("contactIds", org.json.JSONArray(database.lists().memberIds(list.id))) }) }; call.resolve(JSObject().apply { put("lists", lists) }) }.start() }
@@ -94,7 +97,7 @@ class SmsPlugin : Plugin() {
     @PluginMethod fun upsertContact(call: PluginCall) {
         val name = call.getString("name")?.trim().orEmpty(); val phone = call.getString("phone")?.trim().orEmpty(); val normalized = call.getString("normalizedPhone")?.trim().orEmpty(); val requestedId = call.getLong("id")
         if (name.isBlank() || normalized.isBlank()) return call.reject("Nome e telefone são obrigatórios")
-        Thread { val old = requestedId?.let { database.contacts().find(it) } ?: database.contacts().byNormalizedPhone(normalized); val contact = ContactEntity(id = old?.id ?: 0, name = name, phone = phone, normalizedPhone = normalized, company = call.getString("company"), city = call.getString("city"), state = call.getString("state"), customFieldsJson = call.getString("customFieldsJson"), authorized = call.getBoolean("authorized") ?: false, unsubscribed = call.getBoolean("unsubscribed") ?: false, createdAt = old?.createdAt ?: System.currentTimeMillis()); if (old == null) database.contacts().insert(contact) else database.contacts().update(contact); call.resolve(JSObject().apply { put("saved", true); put("id", old?.id ?: database.contacts().byNormalizedPhone(normalized)?.id ?: 0) }) }.start()
+        Thread { val old = requestedId?.let { database.contacts().find(it) } ?: database.contacts().byNormalizedPhone(normalized); val contact = mergeContact(old, ContactPatch(name, phone, normalized, call.getString("company"), call.has("company"), call.getString("city"), call.has("city"), call.getString("state"), call.has("state"), call.getString("customFieldsJson"), call.has("customFieldsJson"), call.getBoolean("authorized"), call.has("authorized"), call.getBoolean("unsubscribed"), call.has("unsubscribed"))); if (old == null) database.contacts().insert(contact) else database.contacts().update(contact); call.resolve(JSObject().apply { put("saved", true); put("id", old?.id ?: database.contacts().byNormalizedPhone(normalized)?.id ?: 0) }) }.start()
     }
 
     @PluginMethod fun deleteContacts(call: PluginCall) {
@@ -107,9 +110,9 @@ class SmsPlugin : Plugin() {
     @PluginMethod fun listDiagnostics(call: PluginCall) { Thread { val array = org.json.JSONArray(); database.diagnostics().recent(200).forEach { event -> array.put(JSObject().apply { put("id", event.id); put("category", event.category); put("code", event.code); put("message", event.message); put("createdAt", event.createdAt) }) }; call.resolve(JSObject().apply { put("events", array) }) }.start() }
 
     @PluginMethod fun enqueue(call: PluginCall) {
-        val requestId = call.getString("requestId") ?: UUID.randomUUID().toString(); val destination = call.getString("destination")?.trim().orEmpty(); val body = call.getString("body").orEmpty(); val subscriptionId = call.getInt("subscriptionId") ?: return call.reject("subscriptionId é obrigatório"); val contactId = call.getLong("contactId")
+        val requestId = call.getString("requestId") ?: UUID.randomUUID().toString(); val destination = call.getString("destination")?.trim().orEmpty(); val body = call.getString("body").orEmpty(); val subscriptionId = call.getInt("subscriptionId") ?: return call.reject("subscriptionId é obrigatório"); val contactId = call.getLong("contactId"); val campaignId = call.getLong("campaignId")
         if (destination.isBlank() || body.isBlank()) return call.reject("destination e body são obrigatórios")
-        Thread { if (!hasActiveSubscription(subscriptionId)) return@Thread call.reject("SIM selecionado não está ativo"); if (database.queue().byRequestId(requestId) != null) return@Thread call.reject("requestId duplicado"); if (contactId != null) { val contact = database.contacts().find(contactId); if (contact == null || !contact.authorized || contact.unsubscribed) return@Thread call.reject("Contato não autorizado ou descadastrado") }; val id = database.queue().insert(QueueItemEntity(requestId = requestId, contactId = contactId, destination = destination, body = body, subscriptionId = subscriptionId)); call.resolve(JSObject().apply { put("queued", id > 0); put("queueItemId", id); put("requestId", requestId) }) }.start()
+        Thread { if (!hasActiveSubscription(subscriptionId)) return@Thread call.reject("SIM selecionado não está ativo"); if (campaignId != null && database.campaigns().find(campaignId) == null) return@Thread call.reject("Campanha não encontrada"); if (database.queue().byRequestId(requestId) != null) return@Thread call.reject("requestId duplicado"); if (contactId != null) { val contact = database.contacts().find(contactId); if (contact == null || !contact.authorized || contact.unsubscribed) return@Thread call.reject("Contato não autorizado ou descadastrado") }; val partsExpected = context.getSystemService(SmsManager::class.java).divideMessage(body).size; val id = database.queue().insert(QueueItemEntity(requestId = requestId, campaignId = campaignId, contactId = contactId, destination = destination, body = body, subscriptionId = subscriptionId, partsExpected = partsExpected)); call.resolve(JSObject().apply { put("queued", id > 0); put("queueItemId", id); put("requestId", requestId) }) }.start()
     }
 
     @PluginMethod fun startQueue(call: PluginCall) { val intervalMs = call.getLong("intervalMs") ?: 0L; val batchSize = call.getInt("batchSize") ?: 0; val intent = Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_START).putExtra("intervalMs", intervalMs).putExtra("batchSize", batchSize); if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent); call.resolve(JSObject().apply { put("started", true); put("intervalMs", intervalMs); put("batchSize", batchSize) }) }
@@ -132,9 +135,8 @@ class SmsPlugin : Plugin() {
                 val itemId = database.queue().insert(QueueItemEntity(requestId = requestId, destination = destination, body = body, subscriptionId = subscriptionId, state = QueueStates.PROCESSING, processingAt = System.currentTimeMillis(), partsExpected = parts.size, attemptCount = 1))
                 if (itemId == -1L) return@Thread call.reject("Não foi possível persistir a solicitação")
                 database.diagnostics().insert(DiagnosticEventEntity(category = "SMS_REQUEST", message = "Solicitação persistida para $requestId"))
-                val sent = PendingIntent.getBroadcast(context, requestId.hashCode(), Intent(context, SmsResultReceiver::class.java).setAction(SmsResultReceiver.ACTION_SENT).putExtra("requestId", requestId), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                val delivered = PendingIntent.getBroadcast(context, requestId.hashCode() + 1, Intent(context, SmsResultReceiver::class.java).setAction(SmsResultReceiver.ACTION_DELIVERED).putExtra("requestId", requestId), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                if (parts.size == 1) sms.sendTextMessage(destination, null, body, sent, delivered) else sms.sendMultipartTextMessage(destination, null, parts, ArrayList(List(parts.size) { sent }), ArrayList(List(parts.size) { delivered }))
+                fun callback(action: String, partIndex: Int, offset: Int): PendingIntent = PendingIntent.getBroadcast(context, requestId.hashCode() * 31 + partIndex * 2 + offset, Intent(context, SmsResultReceiver::class.java).setAction(action).putExtra("requestId", requestId).putExtra("partIndex", partIndex), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                if (parts.size == 1) sms.sendTextMessage(destination, null, body, callback(SmsResultReceiver.ACTION_SENT, 0, 0), callback(SmsResultReceiver.ACTION_DELIVERED, 0, 1)) else sms.sendMultipartTextMessage(destination, null, parts, ArrayList(parts.indices.map { callback(SmsResultReceiver.ACTION_SENT, it, 0) }), ArrayList(parts.indices.map { callback(SmsResultReceiver.ACTION_DELIVERED, it, 1) }))
                 call.resolve(JSObject().apply { put("accepted", true); put("requestId", requestId); put("queueItemId", itemId) })
             } catch (error: Exception) {
                 database.queue().markResult(requestId, QueueStates.FAILED, -1, error.message, System.currentTimeMillis())

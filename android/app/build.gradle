@@ -63,8 +63,11 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    testImplementation "androidx.test:core:1.6.1"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    androidTestImplementation "androidx.test:core:1.6.1"
+    androidTestImplementation "androidx.room:room-testing:2.7.0"
     implementation project(':capacitor-cordova-android-plugins')
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.0.21'
     implementation 'androidx.room:room-runtime:2.7.0'

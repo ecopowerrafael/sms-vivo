@@ -31,7 +31,7 @@ function renderPage(route: AppRoute, navigate: (route: AppRoute) => void) {
     case 'campaigns': return <CampaignsPage />;
     case 'queue': return <QueuePage />;
     case 'send': return <SendSmsPage />;
-    case 'lists': return <ListsPage />;
+    case 'lists': return <ListsPage onNavigate={navigate} />;
     case 'templates': return <TemplatesPage />;
     case 'history': return <HistoryPage />;
     case 'laboratory': return <LaboratoryPage />;

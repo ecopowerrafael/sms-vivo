@@ -30,4 +30,4 @@ jobs:
       - name: Compile Android sources only
         run: |
           chmod +x android/gradlew
-          android/gradlew -p android --no-daemon --max-workers=2 compileDebugKotlin compileDebugJavaWithJavac
+          android/gradlew -p android --no-daemon --max-workers=2 testDebugUnitTest compileDebugKotlin compileDebugJavaWithJavac compileDebugAndroidTestKotlin compileDebugAndroidTestJavaWithJavac

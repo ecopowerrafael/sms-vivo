@@ -52,9 +52,13 @@ jobs:
         shell: bash
         run: |
           APK=android/app/build/outputs/apk/release/app-release.apk
+          AAPT=$(find "${ANDROID_HOME}/build-tools" -type f -name aapt | sort | tail -n1)
+          APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort | tail -n1)
           test -f "${APK}"
-          aapt dump badging "${APK}" | grep -E "package: name='br.com.smsvivo.app' versionCode='2'"
-          apksigner verify --verbose --print-certs "${APK}"
+          test -x "${AAPT}"
+          test -x "${APKSIGNER}"
+          "${AAPT}" dump badging "${APK}" | grep -E "package: name='br.com.smsvivo.app' versionCode='2'"
+          "${APKSIGNER}" verify --verbose --print-certs "${APK}"
       - name: Upload signed release APK
         if: ${{ inputs.build_release }}
         uses: actions/upload-artifact@v4

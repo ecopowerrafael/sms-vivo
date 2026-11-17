@@ -34,9 +34,15 @@ jobs:
         shell: bash
         run: |
           test -n "${ANDROID_KEYSTORE_BASE64}" || { echo "ANDROID_KEYSTORE_BASE64 is required for a release build"; exit 1; }
+          test -n "${ANDROID_KEYSTORE_PASSWORD}" || { echo "ANDROID_KEYSTORE_PASSWORD is required for a release build"; exit 1; }
+          test -n "${ANDROID_KEY_ALIAS}" || { echo "ANDROID_KEY_ALIAS is required for a release build"; exit 1; }
+          test -n "${ANDROID_KEY_PASSWORD}" || { echo "ANDROID_KEY_PASSWORD is required for a release build"; exit 1; }
           echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > android/release.keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - name: Build optional release APK
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
         run: android/gradlew -p android assembleRelease

@@ -41,7 +41,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - name: Build signed release APK
         if: ${{ inputs.build_release }}
-        run: android/gradlew -p android assembleRelease
+        run: chmod +x android/gradlew && android/gradlew -p android assembleRelease
         env:
           SMS_VIVO_KEYSTORE_PATH: ${{ github.workspace }}/android/release.keystore
           SMS_VIVO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

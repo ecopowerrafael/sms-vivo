@@ -13,7 +13,7 @@ npx cap sync android
 cd android && ./gradlew assembleDebug
 ```
 
-O build Android usa Java 21.
+O build Android usa Java 21. O `applicationId` permanente é `br.com.smsvivo.app` e o `versionCode` atual é `2`; toda versão distribuída como atualização deve aumentar o `versionCode` sem alterar o `applicationId`.
 
 O APK debug fica em `android/app/build/outputs/apk/debug/app-debug.apk`. No GitHub, o workflow `Android APK` publica o mesmo arquivo como artifact em cada push para `main`/`develop` ou execução manual.
 
@@ -31,6 +31,8 @@ git push -u origin master
 Depois do push, abra a aba **Actions**, aguarde o workflow `Android APK` e baixe o artifact `sms-vivo-debug-apk`. Para uma distribuição recorrente, use uma GitHub Release e anexe o APK gerado; no WordPress, publique um botão apontando para a URL da Release. Não envie o APK como anexo do Gmail nem desative filtros de upload.
 
 Para um release assinado, execute o workflow manualmente com `build_release=true` depois de configurar os quatro Secrets de keystore. Se uma keystore diferente for usada, o Android não aceitará a atualização sobre a instalação anterior; será necessário desinstalar, perdendo os dados locais.
+
+Para verificar a assinatura de um APK instalado ou recebido, compare o certificado exibido por `apksigner verify --print-certs app-release.apk` com o certificado da instalação existente. O certificado precisa ser o mesmo; os valores dos Secrets nunca devem ser impressos nos logs. O Room mantém a cadeia de migrations 1→2→3: a migration 2→3 cria apenas a tabela de callbacks multipartes e não remove dados existentes.
 
 ## Arquitetura
 
@@ -58,3 +60,5 @@ O Laboratório aceita números separados por linha, vírgula ou ponto e vírgula
 Os eventos técnicos persistidos podem ser consultados na seção “Diagnóstico técnico” do app. Eles registram categorias, códigos e horários; o histórico de SMS fica separado e mantém os estados `SENT`, `DELIVERED`, `FAILED` e `UNKNOWN`.
 
 `npm audit --omit=dev --audit-level=high` foi executado após a troca do parser de planilhas e retornou zero vulnerabilidades na árvore de produção. O bundle web ainda emite um aviso de tamanho por incluir o parser XLSX; isso é uma otimização pendente, não uma falha funcional.
+
+O workflow de validação executa testes JavaScript, testes unitários Kotlin, compilação dos testes instrumentados e `connectedDebugAndroidTest` em um emulador Android API 35. O envio real por Vivo, comportamento sob HyperOS e confirmação de entrega dependem do Redmi 12 físico.

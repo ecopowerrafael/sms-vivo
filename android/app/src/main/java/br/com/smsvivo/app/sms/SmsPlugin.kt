@@ -36,7 +36,7 @@ import java.util.UUID
 
 @CapacitorPlugin(name = "Sms", permissions = [Permission(alias = "sms", strings = [Manifest.permission.SEND_SMS]), Permission(alias = "phoneState", strings = [Manifest.permission.READ_PHONE_STATE]), Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS])])
 class SmsPlugin : Plugin() {
-    companion object { private const val ACTION_RESULT = SmsResultReceiver.ACTION_UI_RESULT }
+    companion object { private const val ACTION_RESULT = SmsResultReceiver.ACTION_UI_RESULT; private const val PROCESSING_RECOVERY_GRACE_MS = 60_000L }
     private val database by lazy { SmsDatabase.get(context) }
 
     private fun hasActiveSubscription(subscriptionId: Int): Boolean {
@@ -55,7 +55,7 @@ class SmsPlugin : Plugin() {
 
     override fun load() {
         super.load()
-        if (!SmsQueueService.isActive.get()) Thread { database.queue().recoverProcessing() }.start()
+        if (!SmsQueueService.isActive.get()) Thread { database.queue().recoverStaleProcessing(System.currentTimeMillis() - PROCESSING_RECOVERY_GRACE_MS) }.start()
         val filter = IntentFilter(ACTION_RESULT)
         if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED) else @Suppress("DEPRECATION") context.registerReceiver(receiver, filter)
     }

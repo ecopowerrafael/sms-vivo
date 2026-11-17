@@ -33,4 +33,30 @@ class QueuePersistenceTest {
         database.recordPartCallback(SmsPartCallbackEntity("multipart-request", 1, SmsResultPhase.DELIVERED, -1, 13))
         assertEquals(QueueStates.DELIVERED, database.queue().byRequestId("multipart-request")?.state)
     }
+
+    @Test fun outOfOrderDeliveryDoesNotCompleteBeforeAllSendCallbacks() {
+        database.queue().insert(QueueItemEntity(requestId = "out-of-order", destination = "+5511999999999", body = "teste", subscriptionId = 1, state = QueueStates.PROCESSING, partsExpected = 2))
+        database.recordPartCallback(SmsPartCallbackEntity("out-of-order", 0, SmsResultPhase.DELIVERED, 0, 10))
+        assertEquals(QueueStates.PROCESSING, database.queue().byRequestId("out-of-order")?.state)
+        database.recordPartCallback(SmsPartCallbackEntity("out-of-order", 0, SmsResultPhase.SENT, 0, 11))
+        database.recordPartCallback(SmsPartCallbackEntity("out-of-order", 1, SmsResultPhase.SENT, 0, 12))
+        database.recordPartCallback(SmsPartCallbackEntity("out-of-order", 1, SmsResultPhase.DELIVERED, 0, 13))
+        assertEquals(QueueStates.DELIVERED, database.queue().byRequestId("out-of-order")?.state)
+    }
+
+    @Test fun deliveryFailureIsTerminalAndDuplicateFailureIsIgnored() {
+        database.queue().insert(QueueItemEntity(requestId = "delivery-failure", destination = "+5511999999999", body = "teste", subscriptionId = 1, state = QueueStates.PROCESSING, partsExpected = 1))
+        val failure = SmsPartCallbackEntity("delivery-failure", 0, SmsResultPhase.DELIVERY_FAILED, 128, 20)
+        assertEquals(QueueStates.FAILED, database.recordPartFailure(failure)?.state)
+        assertEquals(null, database.recordPartFailure(failure))
+        assertEquals(QueueStates.FAILED, database.queue().byRequestId("delivery-failure")?.state)
+    }
+
+    @Test fun recoveryOnlyMarksStaleProcessingRows() {
+        database.queue().insert(QueueItemEntity(requestId = "recent", destination = "+5511999999999", body = "teste", subscriptionId = 1, state = QueueStates.PROCESSING, processingAt = 900))
+        database.queue().insert(QueueItemEntity(requestId = "stale", destination = "+5511999999999", body = "teste", subscriptionId = 1, state = QueueStates.PROCESSING, processingAt = 100))
+        assertEquals(1, database.queue().recoverStaleProcessing(500))
+        assertEquals(QueueStates.PROCESSING, database.queue().byRequestId("recent")?.state)
+        assertEquals(QueueStates.UNKNOWN, database.queue().byRequestId("stale")?.state)
+    }
 }

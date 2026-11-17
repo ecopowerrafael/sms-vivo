@@ -32,6 +32,18 @@ abstract class SmsDatabase : RoomDatabase() {
         } finally { endTransaction() }
     }
 
+    fun recordPartFailure(callback: SmsPartCallbackEntity): QueueItemEntity? {
+        beginTransaction()
+        return try {
+            val result = if (smsPartCallbacks().insert(callback) == -1L) null else {
+                queue().markResult(callback.requestId, QueueStates.FAILED, callback.resultCode, "Código Android ${callback.resultCode}", callback.createdAt)
+                queue().byRequestId(callback.requestId)
+            }
+            setTransactionSuccessful()
+            result
+        } finally { endTransaction() }
+    }
+
     companion object {
         @Volatile private var instance: SmsDatabase? = null
         private val MIGRATION_1_2 = object : Migration(1, 2) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("CREATE TABLE IF NOT EXISTS contact_list_memberships (listId INTEGER NOT NULL, contactId INTEGER NOT NULL, addedAt INTEGER NOT NULL, PRIMARY KEY(listId, contactId))"); database.execSQL("CREATE INDEX IF NOT EXISTS index_contact_list_memberships_contactId ON contact_list_memberships(contactId)") } }
@@ -40,4 +52,4 @@ abstract class SmsDatabase : RoomDatabase() {
     }
 }
 
-object SmsResultPhase { const val SENT = "SENT"; const val DELIVERED = "DELIVERED" }
+object SmsResultPhase { const val SENT = "SENT"; const val DELIVERED = "DELIVERED"; const val SENT_FAILED = "SENT_FAILED"; const val DELIVERY_FAILED = "DELIVERY_FAILED" }

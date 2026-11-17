@@ -22,18 +22,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class SmsQueueService : Service() {
     companion object { const val ACTION_START = "br.com.smsvivo.app.queue.START"; const val ACTION_PAUSE = "br.com.smsvivo.app.queue.PAUSE"; const val ACTION_STOP = "br.com.smsvivo.app.queue.STOP"; private const val CHANNEL = "sms_queue"; private const val NOTIFICATION_ID = 4101; val isActive = AtomicBoolean(false) }
-    private val running = AtomicBoolean(false); private val paused = AtomicBoolean(false); private val normalStop = AtomicBoolean(false); private val executor = Executors.newSingleThreadExecutor(); private val database by lazy { SmsDatabase.get(this) }
+    private val running = AtomicBoolean(false); private val paused = AtomicBoolean(false); private val executor = Executors.newSingleThreadExecutor(); private val database by lazy { SmsDatabase.get(this) }
     private var intervalMs: Long = 0; private var batchSize: Int = 0; private var pendingCount = 0; private var processedCount = 0
     override fun onCreate() { super.onCreate(); isActive.set(true); createChannel() }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.hasExtra("intervalMs") == true) intervalMs = intent.getLongExtra("intervalMs", 0)
         if (intent?.hasExtra("batchSize") == true) batchSize = intent.getIntExtra("batchSize", 0).coerceAtLeast(0)
-        when (intent?.action) { ACTION_PAUSE -> paused.set(true); ACTION_STOP -> { normalStop.set(true); paused.set(true); executor.execute { database.queue().cancelPending(); refreshNotificationCounts(); stopSelf() }; return START_NOT_STICKY }; else -> startProcessing() }
+        when (intent?.action) { ACTION_PAUSE -> paused.set(true); ACTION_STOP -> { paused.set(true); executor.execute { database.queue().cancelPending(); refreshNotificationCounts(); stopSelf() }; return START_NOT_STICKY }; else -> startProcessing() }
         updateNotification(); return START_STICKY
     }
     private fun startProcessing() {
         if (running.getAndSet(true)) { paused.set(false); return }
-        paused.set(false); normalStop.set(false)
+        paused.set(false)
         val type = if (Build.VERSION.SDK_INT >= 34) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(), type) else startForeground(NOTIFICATION_ID, notification())
         executor.execute {
@@ -68,5 +68,5 @@ class SmsQueueService : Service() {
     private fun refreshNotificationCounts() { val q = database.queue(); val total = q.total(); pendingCount = q.count(QueueStates.PENDING); processedCount = total - pendingCount - q.count(QueueStates.PROCESSING); updateNotification() }
     private fun updateNotification() { if (running.get()) getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification()) }
     override fun onBind(intent: Intent?): IBinder? = null
-    override fun onDestroy() { if (running.get() && !normalStop.get()) database.queue().recoverProcessing(); isActive.set(false); paused.set(true); executor.shutdownNow(); super.onDestroy() }
+    override fun onDestroy() { isActive.set(false); paused.set(true); executor.shutdownNow(); super.onDestroy() }
 }

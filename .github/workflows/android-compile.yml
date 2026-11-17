@@ -8,6 +8,7 @@ on:
 jobs:
   compile:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -31,3 +32,13 @@ jobs:
         run: |
           chmod +x android/gradlew
           android/gradlew -p android --no-daemon --max-workers=2 testDebugUnitTest compileDebugKotlin compileDebugJavaWithJavac compileDebugAndroidTestKotlin compileDebugAndroidTestJavaWithJavac
+      - name: Run instrumented Room tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: Pixel_2
+          emulator-options: -no-window -no-audio -no-boot-anim
+          disable-animations: true
+          script: android/gradlew -p android --no-daemon --max-workers=2 connectedDebugAndroidTest

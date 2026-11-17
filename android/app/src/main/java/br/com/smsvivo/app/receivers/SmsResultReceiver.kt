@@ -18,7 +18,8 @@ class SmsResultReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val requestId = intent.getStringExtra("requestId") ?: return
         val code = resultCode
-        val state = if (intent.action == ACTION_DELIVERED) QueueStates.DELIVERED else if (code == android.app.Activity.RESULT_OK) QueueStates.SENT else QueueStates.FAILED
+        val isDeliveredCallback = intent.action == ACTION_DELIVERED
+        val state = if (isDeliveredCallback && code == android.app.Activity.RESULT_OK) QueueStates.DELIVERED else if (!isDeliveredCallback && code == android.app.Activity.RESULT_OK) QueueStates.SENT else QueueStates.FAILED
         val pending = goAsync()
         Thread {
             try {
@@ -31,8 +32,8 @@ class SmsResultReceiver : BroadcastReceiver() {
                     val phase = if (state == QueueStates.DELIVERED) SmsResultPhase.DELIVERED else SmsResultPhase.SENT
                     database.recordPartCallback(SmsPartCallbackEntity(requestId, partIndex, phase, code, now))?.state
                 } else {
-                    queue.markResult(requestId, state, code, "Código Android $code", now)
-                    state
+                    val phase = if (isDeliveredCallback) SmsResultPhase.DELIVERY_FAILED else SmsResultPhase.SENT_FAILED
+                    database.recordPartFailure(SmsPartCallbackEntity(requestId, partIndex, phase, code, now))?.state
                 }
                 database.diagnostics().insert(DiagnosticEventEntity(category = "SMS_RESULT", code = code, message = "$state:$requestId"))
                 if (finalState == QueueStates.SENT || finalState == QueueStates.DELIVERED || finalState == QueueStates.FAILED) {

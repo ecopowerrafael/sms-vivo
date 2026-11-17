@@ -1,20 +1,20 @@
 name: Android APK
 on:
-  push:
-    branches: [main, develop, master]
   workflow_dispatch:
     inputs:
       build_release:
-        description: Build the optional release APK
+        description: Build the signed release APK from codex/stage2-robustness
         required: false
         type: boolean
-        default: false
+        default: true
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v5
+      - name: Require homologation branch
+        run: test "${GITHUB_REF_NAME}" = "codex/stage2-robustness"
       - uses: actions/setup-node@v5
         with: { node-version: 20, cache: npm }
       - run: npm ci
@@ -23,14 +23,8 @@ jobs:
       - run: npx cap sync android
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: '21' }
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - run: chmod +x android/gradlew && android/gradlew -p android assembleDebug
-      - uses: actions/upload-artifact@v4
-        with: { name: sms-vivo-debug-apk, path: android/app/build/outputs/apk/debug/app-debug.apk }
-      - name: Prepare optional release keystore
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+      - name: Prepare release keystore and validate secrets
+        if: ${{ inputs.build_release }}
         shell: bash
         run: |
           test -n "${ANDROID_KEYSTORE_BASE64}" || { echo "ANDROID_KEYSTORE_BASE64 is required for a release build"; exit 1; }
@@ -38,20 +32,32 @@ jobs:
           test -n "${ANDROID_KEY_ALIAS}" || { echo "ANDROID_KEY_ALIAS is required for a release build"; exit 1; }
           test -n "${ANDROID_KEY_PASSWORD}" || { echo "ANDROID_KEY_PASSWORD is required for a release build"; exit 1; }
           echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > android/release.keystore
+          test -s android/release.keystore
+          keytool -list -keystore android/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" -alias "${ANDROID_KEY_ALIAS}" >/dev/null
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      - name: Build optional release APK
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+      - name: Build signed release APK
+        if: ${{ inputs.build_release }}
         run: android/gradlew -p android assembleRelease
         env:
           SMS_VIVO_KEYSTORE_PATH: ${{ github.workspace }}/android/release.keystore
           SMS_VIVO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           SMS_VIVO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           SMS_VIVO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      - name: Upload optional release APK
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_release }}
+      - name: Verify release identity and signature
+        if: ${{ inputs.build_release }}
+        shell: bash
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -f "${APK}"
+          aapt dump badging "${APK}" | grep -E "package: name='br.com.smsvivo.app' versionCode='2'"
+          apksigner verify --verbose --print-certs "${APK}"
+      - name: Upload signed release APK
+        if: ${{ inputs.build_release }}
         uses: actions/upload-artifact@v4
-        with: { name: sms-vivo-release-apk, path: android/app/build/outputs/apk/release/*.apk }
+        with:
+          name: sms-vivo-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk

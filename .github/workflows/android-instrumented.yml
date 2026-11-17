@@ -1,0 +1,42 @@
+name: Android instrumented tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  instrumented:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync android
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile Android test sources
+        run: |
+          chmod +x android/gradlew
+          android/gradlew -p android --no-daemon --max-workers=2 compileDebugKotlin compileDebugJavaWithJavac compileDebugAndroidTestKotlin compileDebugAndroidTestJavaWithJavac
+      - name: Run instrumented Room tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          target: google_apis
+          arch: x86
+          profile: Nexus 5
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+          disable-animations: false
+          emulator-boot-timeout: 600
+          cores: 2
+          ram-size: 2048M
+          force-avd-creation: true
+          script: android/gradlew -p android --no-daemon --max-workers=2 connectedDebugAndroidTest

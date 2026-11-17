@@ -17,13 +17,19 @@ abstract class SmsDatabase : RoomDatabase() {
     abstract fun campaigns(): CampaignDao
     abstract fun smsPartCallbacks(): SmsPartCallbackDao
 
-    fun recordPartCallback(callback: SmsPartCallbackEntity): QueueItemEntity? = runInTransaction {
-        if (smsPartCallbacks().insert(callback) == -1L) return@runInTransaction null
-        when (callback.phase) {
-            SmsResultPhase.SENT -> queue().markSentPart(callback.requestId, callback.createdAt)
-            SmsResultPhase.DELIVERED -> queue().markDeliveredPart(callback.requestId, callback.createdAt)
-        }
-        queue().byRequestId(callback.requestId)
+    fun recordPartCallback(callback: SmsPartCallbackEntity): QueueItemEntity? {
+        beginTransaction()
+        return try {
+            val result = if (smsPartCallbacks().insert(callback) == -1L) null else {
+                when (callback.phase) {
+                    SmsResultPhase.SENT -> queue().markSentPart(callback.requestId, callback.createdAt)
+                    SmsResultPhase.DELIVERED -> queue().markDeliveredPart(callback.requestId, callback.createdAt)
+                }
+                queue().byRequestId(callback.requestId)
+            }
+            setTransactionSuccessful()
+            result
+        } finally { endTransaction() }
     }
 
     companion object {

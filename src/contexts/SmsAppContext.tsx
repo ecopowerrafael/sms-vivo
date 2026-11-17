@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Sms } from '../services/sms';
 import type { CampaignRecord, ContactListRecord, ContactRecord, DiagnosticRecord, MessageTemplateRecord } from '../services/sms';
-import { csvCell, findDuplicates, parseCsv, parseXlsx } from '../services/contacts';
+import { csvCell, findDuplicates, parseContactsFile } from '../services/contacts';
+import type { ImportProgress } from '../services/contacts';
 import type { SmsDiagnostic, SmsResult } from '../types/sms';
 import { filterHistory, type HistoryFilters } from '../utils/history';
 import { normalizePhone, renderTemplate, smsSegments } from '../utils/sms';
@@ -30,7 +31,7 @@ type AppContextValue = {
   requestSendPermission: () => Promise<void>;
   requestPhoneStatePermission: () => Promise<void>;
   requestNotificationPermission: () => Promise<void>;
-  importContacts: (file: File) => Promise<{ saved: number; skipped: number; duplicates: number }>;
+  importContacts: (file: File, onProgress?: (progress: ImportProgress) => void) => Promise<{ saved: number; skipped: number; duplicates: number; errors: { row: number; reason: string }[] }>;
   saveContact: (contact: { id?: number; name: string; phone: string; authorized: boolean; unsubscribed?: boolean; company?: string; city?: string; state?: string }) => Promise<void>;
   deleteContacts: (ids: number[]) => Promise<void>;
   toggleUnsubscribe: (ids: number[]) => Promise<void>;
@@ -79,18 +80,20 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const labRequests = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
-    const [nextDiagnostic, contactsResponse, stats, history, diagnostics, listsResponse, templatesResponse, campaignsResponse] = await Promise.all([
+    const [diagnosticResponse, contactsResponse, statsResponse, historyResponse, diagnosticsResponse, listsResponse, templatesResponse, campaignsResponse] = await Promise.allSettled([
       Sms.diagnose(), Sms.listContacts(), Sms.queueStats(), Sms.listHistory(), Sms.listDiagnostics(), Sms.listContactLists(), Sms.listTemplates(), Sms.listCampaigns(),
     ]);
+    const nextDiagnostic = diagnosticResponse.status === 'fulfilled' ? diagnosticResponse.value : null;
+    if (!nextDiagnostic && diagnosticResponse.status === 'rejected') setNotice({ text: `Diagnóstico indisponível: ${diagnosticResponse.reason instanceof Error ? diagnosticResponse.reason.message : String(diagnosticResponse.reason)}`, tone: 'danger' });
     setDiagnostic(nextDiagnostic);
-    setContacts(contactsResponse.contacts);
-    setQueueStats(stats);
-    setResults(history.results);
-    setDiagnosticEvents(diagnostics.events);
-    setLists(listsResponse.lists);
-    setTemplates(templatesResponse.templates);
-    setCampaigns(campaignsResponse.campaigns);
-    setSelectedSubscriptionIdState(current => current === '' && nextDiagnostic.subscriptions[0] ? nextDiagnostic.subscriptions[0].id : current);
+    if (contactsResponse.status === 'fulfilled') setContacts(contactsResponse.value.contacts);
+    if (statsResponse.status === 'fulfilled') setQueueStats(statsResponse.value);
+    if (historyResponse.status === 'fulfilled') setResults(historyResponse.value.results);
+    if (diagnosticsResponse.status === 'fulfilled') setDiagnosticEvents(diagnosticsResponse.value.events);
+    if (listsResponse.status === 'fulfilled') setLists(listsResponse.value.lists);
+    if (templatesResponse.status === 'fulfilled') setTemplates(templatesResponse.value.templates);
+    if (campaignsResponse.status === 'fulfilled') setCampaigns(campaignsResponse.value.campaigns);
+    setSelectedSubscriptionIdState(current => current === '' && nextDiagnostic?.subscriptions[0] ? nextDiagnostic.subscriptions[0].id : current);
   }, []);
 
   useEffect(() => { refresh().catch(error => setNotice({ text: error instanceof Error ? error.message : String(error), tone: 'danger' })); }, [refresh]);
@@ -124,18 +127,22 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const requestPhoneStatePermission = useCallback(async () => { const response = await Sms.requestPhoneStatePermission(); setNotice({ text: response.granted ? 'Permissão de estado telefônico concedida.' : 'READ_PHONE_STATE não concedida.', tone: response.granted ? 'success' : 'danger' }); await refresh(); }, [refresh]);
   const requestNotificationPermission = useCallback(async () => { const response = await Sms.requestNotificationPermission(); setNotice({ text: response.granted ? 'Permissão de notificações concedida.' : 'Permissão de notificações não concedida.', tone: response.granted ? 'success' : 'danger' }); await refresh(); }, [refresh]);
 
-  const importContacts = useCallback(async (file: File) => {
-    let inputs;
-    try { inputs = file.name.toLowerCase().endsWith('.xlsx') ? await parseXlsx(await file.arrayBuffer()) : parseCsv(await file.text()); }
+  const importContacts = useCallback(async (file: File, onProgress?: (progress: ImportProgress) => void) => {
+    let parsed;
+    try { parsed = await parseContactsFile(file, onProgress); }
     catch (error) { throw new Error(`Não foi possível ler “${file.name}”. Use um CSV ou XLSX compatível. ${error instanceof Error ? error.message : String(error)}`); }
+    const inputs = parsed.inputs;
     const duplicates = findDuplicates(inputs, normalizePhone).length;
-    let saved = 0; let skipped = 0;
-    for (const contact of inputs) {
+    let saved = 0; let skipped = parsed.errors.length;
+    onProgress?.({ stage: 'importing', processed: 0, total: inputs.length });
+    for (const [index, contact] of inputs.entries()) {
       if (!contact.phone) { skipped += 1; continue; }
       try { await Sms.upsertContact({ ...contact, normalizedPhone: normalizePhone(contact.phone) }); saved += 1; } catch { skipped += 1; }
+      onProgress?.({ stage: 'importing', processed: index + 1, total: inputs.length });
     }
     await refresh();
-    return { saved, skipped, duplicates };
+    onProgress?.({ stage: 'complete', processed: inputs.length, total: inputs.length });
+    return { saved, skipped, duplicates, errors: parsed.errors };
   }, [refresh]);
 
   const saveContact = useCallback(async (contact: { id?: number; name: string; phone: string; authorized: boolean; unsubscribed?: boolean; company?: string; city?: string; state?: string }) => {

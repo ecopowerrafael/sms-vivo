@@ -8,6 +8,9 @@ import { normalizePhone, renderTemplate, smsSegments } from '../utils/sms';
 
 export type LabRow = { requestId: string; destination: string; state: SmsResult['state'] | 'PENDING'; interRequestMs: number; startedAt?: number; responseMs?: number; code?: number; message?: string };
 export type AppNotice = { text: string; tone?: 'info' | 'success' | 'danger' };
+export type CampaignDraft = { step: number; name: string; listId: number | ''; recipientIds: number[]; body: string; intervalSeconds: string; batchSize: string; templateId: number | '' };
+
+const emptyCampaignDraft: CampaignDraft = { step: 1, name: '', listId: '', recipientIds: [], body: '', intervalSeconds: '0', batchSize: '0', templateId: '' };
 
 type AppContextValue = {
   diagnostic: SmsDiagnostic | null;
@@ -36,8 +39,10 @@ type AppContextValue = {
   deleteList: (id: number) => Promise<void>;
   saveTemplate: (options: { id?: number; name: string; body: string }) => Promise<void>;
   deleteTemplate: (id: number) => Promise<void>;
+  campaignDraft: CampaignDraft;
+  updateCampaignDraft: (patch: Partial<CampaignDraft>) => void;
   prepareCampaign: (contactIds: number[]) => void;
-  campaignRecipientIds: number[];
+  resetCampaignDraft: () => void;
   createCampaignAndQueue: (options: { name: string; body: string; subscriptionId: number; listId?: number; intervalSeconds: number; batchSize: number; contactIds?: number[] }) => Promise<number>;
   startQueue: (options: { intervalSeconds: number; batchSize: number }) => Promise<void>;
   pauseQueue: () => Promise<void>;
@@ -65,7 +70,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const [queueStats, setQueueStats] = useState<Record<string, number>>({});
   const [selectedSubscriptionId, setSelectedSubscriptionIdState] = useState<number | ''>('');
   const [notice, setNotice] = useState<AppNotice | null>(null);
-  const [campaignRecipientIds, setCampaignRecipientIds] = useState<number[]>([]);
+  const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(emptyCampaignDraft);
   const [labRows, setLabRows] = useState<LabRow[]>([]);
   const [labRunning, setLabRunning] = useState(false);
   const [labNotice, setLabNotice] = useState<AppNotice | null>(null);
@@ -146,17 +151,19 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const deleteList = useCallback(async (id: number) => { await Sms.deleteContactList({ id }); await refresh(); }, [refresh]);
   const saveTemplate = useCallback(async (options: { id?: number; name: string; body: string }) => { await Sms.saveTemplate(options); await refresh(); }, [refresh]);
   const deleteTemplate = useCallback(async (id: number) => { await Sms.deleteTemplate({ id }); await refresh(); }, [refresh]);
-  const prepareCampaign = useCallback((ids: number[]) => setCampaignRecipientIds(ids), []);
+  const updateCampaignDraft = useCallback((patch: Partial<CampaignDraft>) => setCampaignDraft(current => ({ ...current, ...patch })), []);
+  const prepareCampaign = useCallback((ids: number[]) => setCampaignDraft(current => ({ ...current, recipientIds: ids, step: 2 })), []);
+  const resetCampaignDraft = useCallback(() => setCampaignDraft(emptyCampaignDraft), []);
 
   const createCampaignAndQueue = useCallback(async (options: { name: string; body: string; subscriptionId: number; listId?: number; intervalSeconds: number; batchSize: number; contactIds?: number[] }) => {
-    const source = options.contactIds ?? (options.listId ? lists.find(list => list.id === options.listId)?.contactIds ?? [] : campaignRecipientIds);
+    const source = options.contactIds ?? (options.listId ? lists.find(list => list.id === options.listId)?.contactIds ?? [] : campaignDraft.recipientIds);
     const eligible = source.map(id => contacts.find(contact => contact.id === id)).filter((contact): contact is ContactRecord => Boolean(contact?.authorized && !contact.unsubscribed));
     if (eligible.length === 0) throw new Error('Nenhum contato autorizado e não descadastrado foi selecionado.');
     const campaign = await Sms.createCampaign({ name: options.name.trim() || 'Campanha sem nome', subscriptionId: options.subscriptionId, intervalMs: Math.max(0, options.intervalSeconds) * 1000, batchSize: Math.max(0, Math.floor(options.batchSize)), listId: options.listId });
     for (const contact of eligible) await Sms.enqueue({ requestId: crypto.randomUUID(), destination: contact.normalizedPhone, body: renderTemplate(options.body, { nome: contact.name, telefone: contact.phone, empresa: contact.company, cidade: contact.city, estado: contact.state }), subscriptionId: options.subscriptionId, contactId: contact.id, campaignId: campaign.id });
     await refresh();
     return eligible.length;
-  }, [campaignRecipientIds, contacts, lists, refresh]);
+  }, [campaignDraft.recipientIds, contacts, lists, refresh]);
 
   const startQueue = useCallback(async ({ intervalSeconds, batchSize }: { intervalSeconds: number; batchSize: number }) => { await Sms.startQueue({ intervalMs: Math.max(0, intervalSeconds) * 1000, batchSize: Math.max(0, Math.floor(batchSize)) }); await refresh(); }, [refresh]);
   const pauseQueue = useCallback(async () => { await Sms.pauseQueue(); await refresh(); }, [refresh]);
@@ -211,7 +218,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     ]);
   }, [labRows]);
 
-  const value = useMemo<AppContextValue>(() => ({ diagnostic, contacts, lists, templates, campaigns, results, diagnosticEvents, queueStats, selectedSubscriptionId, setSelectedSubscriptionId, refresh, notice, setNotice, sendSms, requestSendPermission, requestPhoneStatePermission, requestNotificationPermission, importContacts, saveContact, deleteContacts, toggleUnsubscribe, createList, updateList, deleteList, saveTemplate, deleteTemplate, prepareCampaign, campaignRecipientIds, createCampaignAndQueue, startQueue, pauseQueue, stopQueue, labRows, labRunning, labNotice, runLaboratory, stopLaboratory, exportContactsCsv, exportHistoryCsv, exportLabCsv }), [campaignRecipientIds, campaigns, contacts, createCampaignAndQueue, createList, deleteContacts, deleteList, deleteTemplate, diagnostic, diagnosticEvents, exportContactsCsv, exportHistoryCsv, exportLabCsv, importContacts, labNotice, labRows, labRunning, lists, notice, pauseQueue, prepareCampaign, refresh, requestNotificationPermission, requestPhoneStatePermission, requestSendPermission, results, runLaboratory, saveContact, saveTemplate, selectedSubscriptionId, sendSms, startQueue, stopLaboratory, stopQueue, templates, toggleUnsubscribe, updateList]);
+  const value = useMemo<AppContextValue>(() => ({ diagnostic, contacts, lists, templates, campaigns, results, diagnosticEvents, queueStats, selectedSubscriptionId, setSelectedSubscriptionId, refresh, notice, setNotice, sendSms, requestSendPermission, requestPhoneStatePermission, requestNotificationPermission, importContacts, saveContact, deleteContacts, toggleUnsubscribe, createList, updateList, deleteList, saveTemplate, deleteTemplate, campaignDraft, updateCampaignDraft, prepareCampaign, resetCampaignDraft, createCampaignAndQueue, startQueue, pauseQueue, stopQueue, labRows, labRunning, labNotice, runLaboratory, stopLaboratory, exportContactsCsv, exportHistoryCsv, exportLabCsv }), [campaignDraft, campaigns, contacts, createCampaignAndQueue, createList, deleteContacts, deleteList, deleteTemplate, diagnostic, diagnosticEvents, exportContactsCsv, exportHistoryCsv, exportLabCsv, importContacts, labNotice, labRows, labRunning, lists, notice, pauseQueue, prepareCampaign, refresh, requestNotificationPermission, requestPhoneStatePermission, requestSendPermission, resetCampaignDraft, results, runLaboratory, saveContact, saveTemplate, selectedSubscriptionId, sendSms, startQueue, stopLaboratory, stopQueue, templates, toggleUnsubscribe, updateCampaignDraft, updateList]);
   return <SmsAppContext.Provider value={value}>{children}</SmsAppContext.Provider>;
 }
 

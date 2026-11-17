@@ -3,10 +3,18 @@ import type { ContactRecord } from './sms';
 
 export type ContactInput = Omit<ContactRecord, 'id' | 'normalizedPhone'>;
 
-function normalizeHeader(value: string): string { return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function normalizeHeader(value: unknown): string { return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 function mapRow(row: Record<string, unknown>): ContactInput {
   const values = new Map(Object.entries(row).map(([key, value]) => [normalizeHeader(key), String(value ?? '').trim()]));
-  return { name: values.get('nome') ?? values.get('name') ?? '', phone: values.get('telefone') ?? values.get('phone') ?? values.get('celular') ?? '', company: values.get('empresa') ?? values.get('company') ?? '', city: values.get('cidade') ?? values.get('city') ?? '', state: values.get('estado') ?? values.get('state') ?? '', authorized: false, unsubscribed: false };
+  return {
+    name: values.get('nome') || values.get('name') || values.get('nomefantasia') || values.get('razaosocial') || '',
+    phone: values.get('telefone') || values.get('phone') || values.get('celular') || values.get('telefone1') || values.get('telefone2') || '',
+    company: values.get('empresa') || values.get('company') || values.get('nomefantasia') || values.get('razaosocial') || '',
+    city: values.get('cidade') || values.get('city') || values.get('municipio') || '',
+    state: values.get('estado') || values.get('state') || values.get('uf') || '',
+    authorized: false,
+    unsubscribed: false,
+  };
 }
 
 export function parseCsv(text: string): ContactInput[] {

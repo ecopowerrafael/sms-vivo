@@ -19,9 +19,11 @@ export interface SmsNativePlugin {
   stopQueue(): Promise<{ stopped: boolean }>;
   listContactLists(): Promise<{ lists: ContactListRecord[] }>;
   createContactList(options: { name: string; description?: string; contactIds?: number[] }): Promise<{ id: number }>;
+  updateContactList(options: { id: number; name: string; description?: string; contactIds?: number[] }): Promise<{ updated: boolean }>;
   deleteContactList(options: { id: number }): Promise<{ deleted: boolean }>;
   listTemplates(): Promise<{ templates: MessageTemplateRecord[] }>;
   saveTemplate(options: { id?: number; name: string; body: string }): Promise<{ saved: boolean }>;
+  deleteTemplate(options: { id: number }): Promise<{ deleted: boolean }>;
   listCampaigns(): Promise<{ campaigns: CampaignRecord[] }>;
   createCampaign(options: { name: string; subscriptionId: number; intervalMs?: number; batchSize?: number; listId?: number; templateId?: number }): Promise<{ id: number }>;
 }

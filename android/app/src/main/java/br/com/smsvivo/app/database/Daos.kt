@@ -46,10 +46,14 @@ interface DiagnosticDao { @Insert fun insert(event: DiagnosticEventEntity): Long
 @Dao
 interface ListDao {
     @Insert fun insert(list: ContactListEntity): Long
+    @Update fun update(list: ContactListEntity)
     @Query("SELECT * FROM contact_lists ORDER BY name COLLATE NOCASE") fun all(): List<ContactListEntity>
+    @Query("SELECT * FROM contact_lists WHERE id = :id LIMIT 1") fun find(id: Long): ContactListEntity?
     @Query("DELETE FROM contact_lists WHERE id = :id") fun delete(id: Long)
     @Insert(onConflict = OnConflictStrategy.IGNORE) fun addMember(member: ContactListMembershipEntity)
     @Query("DELETE FROM contact_list_memberships WHERE listId = :listId AND contactId IN (:contactIds)") fun removeMembers(listId: Long, contactIds: List<Long>)
+    @Query("DELETE FROM contact_list_memberships WHERE listId = :listId") fun removeAllMembers(listId: Long)
+    @Transaction fun replaceMembers(list: ContactListEntity, contactIds: List<Long>) { update(list); removeAllMembers(list.id); contactIds.forEach { addMember(ContactListMembershipEntity(list.id, it)) } }
     @Query("SELECT contactId FROM contact_list_memberships WHERE listId = :listId") fun memberIds(listId: Long): List<Long>
 }
 
@@ -59,6 +63,7 @@ interface TemplateDao {
     @Update fun update(template: MessageTemplateEntity)
     @Query("SELECT * FROM message_templates ORDER BY name COLLATE NOCASE") fun all(): List<MessageTemplateEntity>
     @Query("SELECT * FROM message_templates WHERE id = :id") fun find(id: Long): MessageTemplateEntity?
+    @Query("DELETE FROM message_templates WHERE id = :id") fun delete(id: Long)
 }
 
 @Dao

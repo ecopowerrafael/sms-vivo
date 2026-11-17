@@ -145,7 +145,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const deleteContacts = useCallback(async (ids: number[]) => { if (ids.length === 0) return; await Sms.deleteContacts({ ids }); await refresh(); }, [refresh]);
-  const toggleUnsubscribe = useCallback(async (ids: number[]) => { const selected = contacts.filter(contact => ids.includes(contact.id)); const unsubscribed = selected.some(contact => !contact.unsubscribed); for (const contact of selected) await saveContact({ ...contact, unsubscribed }); await refresh(); }, [contacts, refresh, saveContact]);
+  const toggleUnsubscribe = useCallback(async (ids: number[]) => { const selected = contacts.filter(contact => ids.includes(contact.id)); const unsubscribed = selected.some(contact => !contact.unsubscribed); for (const contact of selected) await Sms.upsertContact({ ...contact, normalizedPhone: contact.normalizedPhone, unsubscribed }); await refresh(); }, [contacts, refresh]);
   const createList = useCallback(async (options: { name: string; description?: string; contactIds: number[] }) => { await Sms.createContactList(options); await refresh(); }, [refresh]);
   const updateList = useCallback(async (options: { id: number; name: string; description?: string; contactIds: number[] }) => { await Sms.updateContactList(options); await refresh(); }, [refresh]);
   const deleteList = useCallback(async (id: number) => { await Sms.deleteContactList({ id }); await refresh(); }, [refresh]);

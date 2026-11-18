@@ -8,6 +8,8 @@ import br.com.smsvivo.app.database.SmsDatabase
 import br.com.smsvivo.app.database.DiagnosticEventEntity
 import br.com.smsvivo.app.database.SmsPartCallbackEntity
 import br.com.smsvivo.app.database.SmsResultPhase
+import br.com.smsvivo.app.database.SettingEntity
+import br.com.smsvivo.app.queue.SmsQueueService
 
 class SmsResultReceiver : BroadcastReceiver() {
     companion object {
@@ -36,6 +38,7 @@ class SmsResultReceiver : BroadcastReceiver() {
                     database.recordPartFailure(SmsPartCallbackEntity(requestId, partIndex, phase, code, now))?.state
                 }
                 database.diagnostics().insert(DiagnosticEventEntity(category = "SMS_RESULT", code = code, message = "$state:$requestId"))
+                if (!isDeliveredCallback && code == android.telephony.SmsManager.RESULT_ERROR_LIMIT_EXCEEDED) database.settings().upsert(SettingEntity(SmsQueueService.SETTING_PAUSE_REASON, SmsQueueService.PAUSE_ANDROID_LIMIT, now))
                 if (finalState == QueueStates.SENT || finalState == QueueStates.DELIVERED || finalState == QueueStates.FAILED) {
                     context.sendBroadcast(Intent(ACTION_UI_RESULT).setPackage(context.packageName).apply { putExtra("requestId", requestId); putExtra("state", finalState); putExtra("code", code); putExtra("sentAt", java.time.Instant.now().toString()) })
                 }

@@ -41,10 +41,12 @@ interface QueueDao {
     @Query("SELECT MAX(COALESCE(deliveredAt, sentAt, createdAt)) FROM queue_items") fun lastActivityAt(): Long?
     @Query("SELECT * FROM queue_items ORDER BY createdAt DESC LIMIT :limit") fun recent(limit: Int): List<QueueItemEntity>
     @Query("SELECT * FROM queue_items ORDER BY createdAt DESC") fun allHistory(): List<QueueItemEntity>
-    @Query("UPDATE queue_items SET state = 'UNKNOWN', failureMessage = 'Processo interrompido antes da confirmação; revisão manual necessária' WHERE state = 'PROCESSING' AND processingAt IS NOT NULL AND processingAt < :cutoff") fun recoverStaleProcessing(cutoff: Long): Int
-    @Query("UPDATE queue_items SET state = :state, failureCode = :code, failureMessage = :message, sentAt = :sentAt WHERE requestId = :requestId") fun markResult(requestId: String, state: String, code: Int?, message: String?, sentAt: Long?)
-    @Query("UPDATE queue_items SET sentParts = sentParts + 1, state = CASE WHEN sentParts + 1 >= partsExpected THEN 'SENT' ELSE state END, sentAt = CASE WHEN sentParts + 1 >= partsExpected THEN :at ELSE sentAt END WHERE requestId = :requestId AND state NOT IN ('FAILED', 'UNKNOWN', 'CANCELLED', 'DELIVERED')") fun markSentPart(requestId: String, at: Long): Int
-    @Query("UPDATE queue_items SET deliveredParts = deliveredParts + 1, state = CASE WHEN deliveredParts + 1 >= partsExpected AND sentParts >= partsExpected THEN 'DELIVERED' ELSE state END, deliveredAt = CASE WHEN deliveredParts + 1 >= partsExpected AND sentParts >= partsExpected THEN :at ELSE deliveredAt END WHERE requestId = :requestId AND state NOT IN ('FAILED', 'UNKNOWN', 'CANCELLED')") fun markDeliveredPart(requestId: String, at: Long): Int
+    @Query("UPDATE queue_items SET state = 'UNKNOWN', unknownAt = :at, failureMessage = 'Processo interrompido antes da confirmação; revisão manual necessária' WHERE state = 'PROCESSING' AND processingAt IS NOT NULL AND processingAt < :cutoff") fun recoverStaleProcessing(cutoff: Long, at: Long = System.currentTimeMillis()): Int
+    @Query("UPDATE queue_items SET smsRequestedAt = :requestedAt, requestIntervalMs = :intervalMs, lastCallbackAt = NULL, lastCallbackCode = NULL WHERE requestId = :requestId") fun markSmsRequested(requestId: String, requestedAt: Long, intervalMs: Long?)
+    @Query("UPDATE queue_items SET state = :state, failureCode = :code, failureMessage = :message, sentAt = :sentAt, lastCallbackAt = :sentAt, lastCallbackCode = :code WHERE requestId = :requestId AND state NOT IN ('UNKNOWN', 'CANCELLED', 'DELIVERED')") fun markResult(requestId: String, state: String, code: Int?, message: String?, sentAt: Long?)
+    @Query("UPDATE queue_items SET sentParts = sentParts + 1, lastCallbackAt = :at, lastCallbackCode = :code, state = CASE WHEN sentParts + 1 >= partsExpected THEN 'SENT' ELSE state END, sentAt = CASE WHEN sentParts + 1 >= partsExpected THEN :at ELSE sentAt END WHERE requestId = :requestId AND state NOT IN ('FAILED', 'UNKNOWN', 'CANCELLED', 'DELIVERED')") fun markSentPart(requestId: String, at: Long, code: Int): Int
+    @Query("UPDATE queue_items SET deliveredParts = deliveredParts + 1, lastCallbackAt = :at, lastCallbackCode = :code, state = CASE WHEN deliveredParts + 1 >= partsExpected AND sentParts >= partsExpected THEN 'DELIVERED' ELSE state END, deliveredAt = CASE WHEN deliveredParts + 1 >= partsExpected AND sentParts >= partsExpected THEN :at ELSE deliveredAt END WHERE requestId = :requestId AND state NOT IN ('FAILED', 'UNKNOWN', 'CANCELLED')") fun markDeliveredPart(requestId: String, at: Long, code: Int): Int
+    @Query("UPDATE queue_items SET state = 'UNKNOWN', unknownAt = :at, failureMessage = :message WHERE requestId = :requestId AND state = 'PROCESSING'") fun markUnknown(requestId: String, at: Long, message: String): Int
     @Query("UPDATE queue_items SET state = 'DELIVERED', deliveredAt = :at WHERE requestId = :requestId") fun markDelivered(requestId: String, at: Long)
     @Query("UPDATE queue_items SET state = 'CANCELLED', failureMessage = 'Cancelado pelo usuário' WHERE state = 'PENDING'") fun cancelPending(): Int
 }
@@ -56,6 +58,13 @@ interface SmsPartCallbackDao {
 
 @Dao
 interface DiagnosticDao { @Insert fun insert(event: DiagnosticEventEntity): Long; @Query("SELECT * FROM diagnostic_events ORDER BY createdAt DESC LIMIT :limit") fun recent(limit: Int): List<DiagnosticEventEntity> }
+
+@Dao
+interface SettingDao {
+    @Query("SELECT * FROM settings WHERE `key` = :key LIMIT 1") fun find(key: String): SettingEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) fun upsert(setting: SettingEntity)
+    @Query("DELETE FROM settings WHERE `key` = :key") fun delete(key: String)
+}
 
 @Dao
 interface ListDao {

@@ -17,13 +17,14 @@ export interface SmsNativePlugin {
   deleteContacts(options: { ids: number[] }): Promise<{ deleted: number; blocked: number }>;
   removeContactsFromList(options: { listId: number; ids: number[] }): Promise<{ removed: number }>;
   correctLegacyContacts(options: { corrections: Array<{ id: number; phone: string; normalizedPhone: string }> }): Promise<{ corrected: number; conflicts: number; failed: number; selected: number }>;
-  queueStats(): Promise<Record<string, number>>;
+  queueStats(): Promise<QueueStats>;
   listHistory(): Promise<{ results: SmsResult[] }>;
   listDiagnostics(): Promise<{ events: DiagnosticRecord[] }>;
   enqueue(options: { requestId: string; destination: string; body: string; subscriptionId: number; contactId?: number; campaignId?: number }): Promise<{ queued: boolean; queueItemId: number; requestId: string }>;
   startQueue(options?: { intervalMs?: number; batchSize?: number }): Promise<{ started: boolean; intervalMs?: number; batchSize?: number }>;
   pauseQueue(): Promise<{ paused: boolean }>;
   stopQueue(): Promise<{ stopped: boolean }>;
+  resumeQueue(): Promise<{ resumed: boolean }>;
   listContactLists(): Promise<{ lists: ContactListRecord[] }>;
   createContactList(options: { name: string; description?: string; contactIds?: number[] }): Promise<{ id: number }>;
   updateContactList(options: { id: number; name: string; description?: string; contactIds?: number[] }): Promise<{ updated: boolean }>;
@@ -38,6 +39,7 @@ export interface SmsNativePlugin {
 export type ContactUpsert = Partial<Pick<ContactRecord, 'id' | 'authorized' | 'unsubscribed' | 'originalPhone' | 'phoneClassification' | 'correctedAt'>> & Omit<ContactRecord, 'id' | 'normalizedPhone' | 'authorized' | 'unsubscribed'> & { normalizedPhone: string };
 
 export interface ContactRecord { id: number; name: string; phone: string; normalizedPhone: string; originalPhone?: string; phoneClassification?: import('./contacts').PhoneClassification; correctedAt?: number; company?: string; city?: string; state?: string; customFieldsJson?: string; authorized: boolean; unsubscribed: boolean; }
+export interface QueueStats { pending: number; processing: number; sent: number; delivered: number; failed: number; unknown: number; cancelled: number; skipped: number; processed: number; total: number; elapsedMs: number; ratePerMinute: number; contacts: number; pauseReason?: string; currentRequestId?: string; currentDestination?: string; currentCampaignId?: number; currentSmsRequestedAt?: number; currentRequestIntervalMs?: number; }
 export interface DeviceContactRecord { sourceId: string; contactId: number; name: string; phone: string; type?: number; }
 export interface ContactListRecord { id: number; name: string; description?: string; parentListId?: number; contactIds: number[]; }
 export interface MessageTemplateRecord { id: number; name: string; body: string; }

@@ -34,13 +34,13 @@ Depois do push na branch `codex/stage2-robustness`, abra a aba **Actions**, agua
 
 Para um release assinado, execute o workflow manualmente com `build_release=true` na branch `codex/stage2-robustness`. O workflow verifica `applicationId=br.com.smsvivo.app`, `versionCode=2` e a assinatura do APK. Se uma keystore diferente for usada, o Android não aceitará a atualização sobre a instalação anterior; será necessário desinstalar, perdendo os dados locais.
 
-Para verificar a assinatura de um APK instalado ou recebido, compare o certificado exibido por `apksigner verify --print-certs app-release.apk` com o certificado da instalação existente. O certificado precisa ser o mesmo; os valores dos Secrets nunca devem ser impressos nos logs. O Room mantém a cadeia de migrations 1→2→3: a migration 2→3 cria apenas a tabela de callbacks multipartes e não remove dados existentes.
+Para verificar a assinatura de um APK instalado ou recebido, compare o certificado exibido por `apksigner verify --print-certs app-release.apk` com o certificado da instalação existente. O certificado precisa ser o mesmo; os valores dos Secrets nunca devem ser impressos nos logs. O Room mantém a cadeia de migrations 1→2→3→4→5. As migrations 3→4 adicionam classificação/origem/correção de telefones e relacionamento pai das listas; a 4→5 adiciona o histórico de autorização. Nenhuma delas remove contatos, memberships ou dados da fila.
 
 ## Arquitetura
 
 React/TypeScript é a camada de apresentação. A fonte de verdade dos contatos e da fila é o Room nativo (`sms-vivo.db`); a ponte Capacitor apenas chama operações nativas. `SmsResultReceiver` persiste confirmações do Android mesmo quando a WebView não está aberta. A fila usa estados `PENDING`, `PROCESSING`, `SENT`, `DELIVERED`, `FAILED`, `UNKNOWN`, `CANCELLED` e `SKIPPED`. Um único worker processa campanhas em ordem; intervalo e lote da campanha são autoritativos, enquanto os controles da fila servem como fallback para itens sem campanha. Callbacks multipartes são idempotentes por request, parte e fase. Itens em `PROCESSING` são marcados como `UNKNOWN` somente ao detectar encerramento inesperado do serviço ou ao reabrir o app sem serviço ativo, sem reenvio automático.
 
-Importações começam como não autorizadas. O servidor nativo da fila rejeita contatos não autorizados ou descadastrados. A campanha rápida pede confirmação antes de enfileirar e o início da fila é uma ação separada.
+Importações exigem nome da lista e análise prévia. O resultado cria uma lista principal e sublistas relacionadas por `parentListId`, classifica telefones brasileiros, permite corrigir candidatos de celular antigo somente após confirmação e preserva o telefone original. A autorização pré-existente é desmarcada por padrão; quando confirmada, é registrada em lote no Room. O servidor nativo nunca reativa descadastrados e rejeita contatos não autorizados ou descadastrados na fila.
 
 ## Primeiro teste no Redmi 12
 

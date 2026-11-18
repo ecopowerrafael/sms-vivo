@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { csvCell, findDuplicates, parseCsv } from './contacts';
+import { classifyPhone, correctLegacyPhone, csvCell, findDuplicates, parseCsv } from './contacts';
 import { normalizePhone } from '../utils/sms';
 import { mapContactRows } from './contacts';
 
@@ -19,4 +19,12 @@ describe('contact import', () => {
     }]);
   });
   it('escapes cells when exporting CSV', () => { expect(csvCell('A "quoted", value')).toBe('"A ""quoted"", value"'); });
+  it('classifies Brazilian mobile, legacy, landline and ambiguous numbers', () => {
+    expect(classifyPhone('11988887777')).toBe('MOBILE_VALID');
+    expect(classifyPhone('1188887777')).toBe('MOBILE_LEGACY_CANDIDATE');
+    expect(classifyPhone('1133334444')).toBe('LANDLINE');
+    expect(classifyPhone('1100000000')).toBe('AMBIGUOUS');
+    expect(classifyPhone('000')).toBe('INVALID');
+  });
+  it('corrects only eligible legacy mobile numbers and preserves the original separately', () => { expect(correctLegacyPhone('1187654321')).toBe('+5511987654321'); expect(() => correctLegacyPhone('1133334444')).toThrow(); });
 });

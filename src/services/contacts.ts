@@ -2,12 +2,33 @@ import { unzipSync } from 'fflate';
 import type { ContactRecord } from './sms';
 
 export type ContactInput = Omit<ContactRecord, 'id' | 'normalizedPhone'>;
+export type PhoneClassification = 'MOBILE_VALID' | 'MOBILE_LEGACY_CANDIDATE' | 'LANDLINE' | 'AMBIGUOUS' | 'INVALID' | 'DUPLICATE';
 export type ImportRowError = { row: number; reason: string };
 export type ImportProgress = { stage: 'reading' | 'validating' | 'importing' | 'complete'; processed: number; total: number };
 
 export function normalizeHeader(value: unknown): string { return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 export function normalizeSearch(value: unknown): string { return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
 function textValue(value: unknown): string { return value == null ? '' : String(value).trim(); }
+export function classifyPhone(value: string): PhoneClassification {
+  const digits = textValue(value).replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  if (!/^\d{10,11}$/.test(digits) || !/^[1-9]\d$/.test(digits.slice(0, 2))) return 'INVALID';
+  const subscriber = digits.slice(2);
+  if (digits.length === 11) return subscriber.startsWith('9') ? 'MOBILE_VALID' : 'INVALID';
+  if (/^[6-9]/.test(subscriber)) return 'MOBILE_LEGACY_CANDIDATE';
+  if (/^[2-5]/.test(subscriber)) return 'LANDLINE';
+  return 'AMBIGUOUS';
+}
+
+export function correctLegacyPhone(value: string): string {
+  const digits = textValue(value).replace(/\D/g, '').replace(/^55(?=\d{10}$)/, '');
+  if (classifyPhone(value) !== 'MOBILE_LEGACY_CANDIDATE') throw new Error('Telefone não é um candidato elegível para correção.');
+  return `+55${digits.slice(0, 2)}9${digits.slice(2)}`;
+}
+
+export function phoneClassificationLabel(value: PhoneClassification): string {
+  return ({ MOBILE_VALID: 'móvel válido', MOBILE_LEGACY_CANDIDATE: 'possível celular antigo', LANDLINE: 'fixo', AMBIGUOUS: 'ambíguo', INVALID: 'inválido', DUPLICATE: 'duplicado' } as Record<PhoneClassification, string>)[value];
+}
+
 function mapRow(row: Record<string, unknown>): ContactInput {
   const values = new Map(Object.entries(row).map(([key, value]) => [normalizeHeader(key), textValue(value)]));
   const firstPhone = values.get('telefone1') || values.get('telefone') || values.get('celular') || '';
@@ -17,6 +38,9 @@ function mapRow(row: Record<string, unknown>): ContactInput {
   return {
     name,
     phone: firstPhone || secondPhone,
+    originalPhone: firstPhone || secondPhone,
+    phoneClassification: classifyPhone(firstPhone || secondPhone),
+    correctedAt: undefined,
     company,
     city: values.get('cidade') || values.get('city') || values.get('municipio') || '',
     state: values.get('estado') || values.get('state') || values.get('uf') || '',

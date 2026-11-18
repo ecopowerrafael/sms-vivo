@@ -12,11 +12,16 @@ interface ContactDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) fun insert(contact: ContactEntity): Long
     @Update fun update(contact: ContactEntity)
     @Query("SELECT * FROM contacts WHERE normalizedPhone = :phone LIMIT 1") fun byNormalizedPhone(phone: String): ContactEntity?
+    @Query("SELECT * FROM contacts WHERE originalPhone = :phone LIMIT 1") fun byOriginalPhone(phone: String): ContactEntity?
     @Query("SELECT * FROM contacts ORDER BY name COLLATE NOCASE") fun all(): List<ContactEntity>
     @Query("SELECT * FROM contacts WHERE id = :id") fun find(id: Long): ContactEntity?
     @Query("DELETE FROM contacts WHERE id IN (:ids)") fun delete(ids: List<Long>)
     @Query("SELECT COUNT(*) FROM contacts") fun count(): Int
+    @Query("UPDATE contacts SET authorized = :authorized, updatedAt = :now WHERE id IN (:ids) AND unsubscribed = 0") fun updateAuthorization(ids: List<Long>, authorized: Boolean, now: Long): Int
 }
+
+@Dao
+interface AuthorizationEventDao { @Insert fun insertAll(events: List<AuthorizationEventEntity>): List<Long> }
 
 @Dao
 interface QueueDao {

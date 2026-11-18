@@ -8,7 +8,9 @@ export interface SmsNativePlugin {
   send(options: { subscriptionId: number; destination: string; body: string; requestId: string }): Promise<{ accepted: boolean; requestId: string }>;
   addListener(eventName: 'smsResult', listenerFunc: (result: SmsResult) => void): Promise<{ remove: () => Promise<void> }>;
   listContacts(): Promise<{ contacts: ContactRecord[] }>;
-  upsertContact(contact: Partial<Pick<ContactRecord, 'id'>> & Omit<ContactRecord, 'id' | 'normalizedPhone'> & { normalizedPhone: string }): Promise<{ saved: boolean; id: number }>;
+  upsertContact(contact: ContactUpsert): Promise<{ saved: boolean; id: number }>;
+  authorizeContacts(options: { ids: number[]; authorized: boolean; source?: string }): Promise<{ updated: number }>;
+  createImportLists(options: { name: string; contactIds: number[]; correctedIds?: number[]; incompleteIds?: number[]; invalidIds?: number[] }): Promise<{ id: number; sublistIds: number[] }>;
   deleteContacts(options: { ids: number[] }): Promise<{ deleted: number }>;
   queueStats(): Promise<Record<string, number>>;
   listHistory(): Promise<{ results: SmsResult[] }>;
@@ -28,8 +30,10 @@ export interface SmsNativePlugin {
   createCampaign(options: { name: string; subscriptionId: number; intervalMs?: number; batchSize?: number; listId?: number; templateId?: number }): Promise<{ id: number }>;
 }
 
-export interface ContactRecord { id: number; name: string; phone: string; normalizedPhone: string; company?: string; city?: string; state?: string; customFieldsJson?: string; authorized: boolean; unsubscribed: boolean; }
-export interface ContactListRecord { id: number; name: string; description?: string; contactIds: number[]; }
+export type ContactUpsert = Partial<Pick<ContactRecord, 'id' | 'authorized' | 'unsubscribed' | 'originalPhone' | 'phoneClassification' | 'correctedAt'>> & Omit<ContactRecord, 'id' | 'normalizedPhone' | 'authorized' | 'unsubscribed'> & { normalizedPhone: string };
+
+export interface ContactRecord { id: number; name: string; phone: string; normalizedPhone: string; originalPhone?: string; phoneClassification?: import('./contacts').PhoneClassification; correctedAt?: number; company?: string; city?: string; state?: string; customFieldsJson?: string; authorized: boolean; unsubscribed: boolean; }
+export interface ContactListRecord { id: number; name: string; description?: string; parentListId?: number; contactIds: number[]; }
 export interface MessageTemplateRecord { id: number; name: string; body: string; }
 export interface CampaignRecord { id: number; name: string; state: string; subscriptionId: number; listId?: number; createdAt: number; }
 export interface DiagnosticRecord { id: number; category: string; code?: number; message: string; createdAt: number; }

@@ -20,6 +20,6 @@ class ContactMergerTest {
         val existing = ContactEntity(id = 8, name = "Oficina", phone = "11987654321", normalizedPhone = "5511987654321", originalPhone = "1187654321", phoneClassification = "MOBILE_VALID", correctedAt = 20)
         val updated = mergeContact(existing, ContactPatch("Oficina atualizada", "1187654321", "551187654321", "1187654321", true, "MOBILE_LEGACY_CANDIDATE", true, null, false, null, false, null, false, null, false, null, false, null, false, null, false))
         assertEquals("11987654321", updated.phone)
-        assertEquals(20, updated.correctedAt)
+        assertEquals(20L, updated.correctedAt)
     }
 }

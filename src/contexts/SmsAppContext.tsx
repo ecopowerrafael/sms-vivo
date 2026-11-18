@@ -232,8 +232,8 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const exportHistoryCsv = useCallback((filters: HistoryFilters) => {
     const filtered = filterHistory(results, filters);
     downloadCsv('sms-vivo-historico.csv', [
-      ['requestId', 'state', 'code', 'sentAt', 'destination', 'campaignId', 'listId', 'subscriptionId', 'message'],
-      ...filtered.map(result => [result.requestId, result.state, result.code ?? '', result.sentAt, result.destination ?? '', result.campaignId ?? '', result.listId ?? '', result.subscriptionId ?? '', result.message ?? '']),
+      ['requestId', 'state', 'code', 'createdAt', 'smsRequestedAt', 'sentAt', 'deliveredAt', 'unknownAt', 'requestIntervalMs', 'lastCallbackAt', 'lastCallbackCode', 'partsExpected', 'sentParts', 'deliveredParts', 'destination', 'campaignId', 'listId', 'subscriptionId', 'message'],
+      ...filtered.map(result => [result.requestId, result.state, result.code ?? '', result.createdAt ?? '', result.smsRequestedAt ?? '', result.sentAt, result.deliveredAt ?? '', result.unknownAt ?? '', result.requestIntervalMs ?? '', result.lastCallbackAt ?? '', result.lastCallbackCode ?? '', result.partsExpected ?? '', result.sentParts ?? '', result.deliveredParts ?? '', result.destination ?? '', result.campaignId ?? '', result.listId ?? '', result.subscriptionId ?? '', result.message ?? '']),
     ]);
   }, [results]);
   const exportLabCsv = useCallback(() => {

@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.provider.ContactsContract
 import android.content.pm.PackageManager
 import android.os.Build
 import android.telephony.SmsManager
@@ -35,7 +36,7 @@ import br.com.smsvivo.app.receivers.SmsResultReceiver
 import br.com.smsvivo.app.queue.SmsQueueService
 import java.util.UUID
 
-@CapacitorPlugin(name = "Sms", permissions = [Permission(alias = "sms", strings = [Manifest.permission.SEND_SMS]), Permission(alias = "phoneState", strings = [Manifest.permission.READ_PHONE_STATE]), Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS])])
+@CapacitorPlugin(name = "Sms", permissions = [Permission(alias = "sms", strings = [Manifest.permission.SEND_SMS]), Permission(alias = "phoneState", strings = [Manifest.permission.READ_PHONE_STATE]), Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS]), Permission(alias = "contacts", strings = [Manifest.permission.READ_CONTACTS])])
 class SmsPlugin : Plugin() {
     companion object { private const val ACTION_RESULT = SmsResultReceiver.ACTION_UI_RESULT; private const val PROCESSING_RECOVERY_GRACE_MS = 60_000L }
     private val database by lazy { SmsDatabase.get(context) }
@@ -80,6 +81,20 @@ class SmsPlugin : Plugin() {
     @PluginMethod fun requestSendPermission(call: PluginCall) { requestPermissionForAlias("sms", call, "smsPermission") }
     @PluginMethod fun requestPhoneStatePermission(call: PluginCall) { requestPermissionForAlias("phoneState", call, "phoneStatePermission") }
     @PluginMethod fun requestNotificationPermission(call: PluginCall) { requestPermissionForAlias("notifications", call, "notificationPermission") }
+    @PluginMethod fun requestContactsPermission(call: PluginCall) { requestPermissionForAlias("contacts", call, "contactsPermission") }
+
+    @PluginMethod fun getDeviceContacts(call: PluginCall) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return call.reject("Permissão READ_CONTACTS não concedida")
+        Thread {
+            val array = org.json.JSONArray()
+            val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone._ID, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.CommonDataKinds.Phone.TYPE)
+            context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} COLLATE NOCASE")?.use { cursor ->
+                val contactId = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID); val phoneId = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone._ID); val name = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME); val number = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER); val type = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.TYPE)
+                while (cursor.moveToNext()) array.put(JSObject().apply { put("sourceId", "${cursor.getLong(contactId)}:${cursor.getLong(phoneId)}"); put("contactId", cursor.getLong(contactId)); put("name", cursor.getString(name) ?: "Sem nome"); put("phone", cursor.getString(number) ?: ""); put("type", cursor.getInt(type)) })
+            }
+            call.resolve(JSObject().apply { put("contacts", array) })
+        }.start()
+    }
 
     @PluginMethod fun listContacts(call: PluginCall) {
         Thread { val array = org.json.JSONArray(); database.contacts().all().forEach { c -> array.put(JSObject().apply { put("id", c.id); put("name", c.name); put("phone", c.phone); put("normalizedPhone", c.normalizedPhone); put("originalPhone", c.originalPhone); put("phoneClassification", c.phoneClassification); put("correctedAt", c.correctedAt); put("company", c.company); put("city", c.city); put("state", c.state); put("customFieldsJson", c.customFieldsJson); put("authorized", c.authorized); put("unsubscribed", c.unsubscribed) }) }; call.resolve(JSObject().apply { put("contacts", array) }) }.start()
@@ -109,7 +124,51 @@ class SmsPlugin : Plugin() {
 
     @PluginMethod fun deleteContacts(call: PluginCall) {
         val ids = call.getArray("ids") ?: return call.reject("ids é obrigatório")
-        Thread { val values = (0 until ids.length()).mapNotNull { ids.optLong(it, -1).takeIf { id -> id > 0 } }; database.contacts().delete(values); call.resolve(JSObject().apply { put("deleted", values.size) }) }.start()
+        Thread { val values = jsonIds(ids).distinct(); val blocked = database.contacts().activeQueueContactIds(values); val deletable = values.filterNot { blocked.contains(it) }; database.beginTransaction(); try { if (deletable.isNotEmpty()) { database.lists().removeMembersFromAll(deletable); database.contacts().delete(deletable) }; database.setTransactionSuccessful(); call.resolve(JSObject().apply { put("deleted", deletable.size); put("blocked", blocked.size) }) } finally { database.endTransaction() } }.start()
+    }
+
+    @PluginMethod fun removeContactsFromList(call: PluginCall) {
+        val listId = call.getLong("listId") ?: return call.reject("listId é obrigatório"); val ids = call.getArray("ids") ?: return call.reject("ids é obrigatório")
+        Thread { val values = jsonIds(ids); database.lists().removeMembers(listId, values); call.resolve(JSObject().apply { put("removed", values.size) }) }.start()
+    }
+
+    @PluginMethod fun correctLegacyContacts(call: PluginCall) {
+        val corrections = call.getArray("corrections") ?: return call.reject("corrections é obrigatório")
+        Thread {
+            val now = System.currentTimeMillis(); var corrected = 0; var conflicts = 0; var failed = 0; val correctedIds = mutableListOf<Long>()
+            database.beginTransaction()
+            try {
+                for (index in 0 until corrections.length()) {
+                    val item = corrections.optJSONObject(index) ?: continue; val id = item.optLong("id", -1); val phone = item.optString("phone").trim(); val normalized = item.optString("normalizedPhone").trim()
+                    if (id <= 0 || phone.isBlank() || normalized.isBlank()) { failed++; continue }
+                    val current = database.contacts().find(id); val conflict = database.contacts().byNormalizedPhone(normalized)
+                    if (current == null || (conflict != null && conflict.id != id)) { if (conflict != null && conflict.id != id) conflicts++ else failed++; continue }
+                    if (current.correctedAt != null && current.phone == phone && current.normalizedPhone == normalized) { correctedIds += id; continue }
+                    if (database.contacts().updateCorrectedPhone(id, phone, normalized, "MOBILE_VALID", now, now) == 1) { corrected++; correctedIds += id } else failed++
+                }
+                val allLists = database.lists().all(); val roots = allLists.filter { it.parentListId == null }
+                roots.forEach { root ->
+                    val children = allLists.filter { it.parentListId == root.id }; val incomplete = children.firstOrNull { it.name.endsWith("(Números incompletos)") }; val correctedList = children.firstOrNull { it.name.endsWith("(Números corrigidos)") } ?: if (correctedIds.isNotEmpty()) ContactListEntity(name = "${root.name} (Números corrigidos)", parentListId = root.id).let { copy -> database.lists().insert(copy).let { id -> database.lists().find(id)!! } } else null
+                    if (incomplete != null && correctedIds.isNotEmpty()) database.lists().removeMembers(incomplete.id, correctedIds)
+                    if (correctedList != null && correctedIds.isNotEmpty()) correctedIds.distinct().forEach { database.lists().addMember(ContactListMembershipEntity(correctedList.id, it)) }
+                }
+                database.setTransactionSuccessful(); call.resolve(JSObject().apply { put("corrected", corrected); put("conflicts", conflicts); put("failed", failed); put("selected", correctedIds.distinct().size) })
+            } finally { database.endTransaction() }
+        }.start()
+    }
+
+    @PluginMethod fun importDeviceContacts(call: PluginCall) {
+        val contacts = call.getArray("contacts") ?: return call.reject("contacts é obrigatório")
+        Thread {
+            var imported = 0; var existing = 0; var skipped = 0; val importedIds = mutableListOf<Long>(); database.beginTransaction()
+            try {
+                for (index in 0 until contacts.length()) {
+                    val item = contacts.optJSONObject(index) ?: continue; val name = item.optString("name").trim().ifBlank { "Contato da agenda" }; val phone = item.optString("phone").trim(); val normalized = item.optString("normalizedPhone").trim(); if (phone.isBlank() || normalized.isBlank()) { skipped++; continue }
+                    val old = database.contacts().byNormalizedPhone(normalized); val original = old?.originalPhone ?: phone; val classification = old?.phoneClassification ?: item.optString("phoneClassification").ifBlank { null }; val entity = mergeContact(old, ContactPatch(name, phone, normalized, original, true, classification, true, null, false, null, false, null, false, null, false, null, false, null, false, null, false)); val id = if (old == null) database.contacts().insert(entity) else { database.contacts().update(entity); old.id }; if (old == null) imported++ else existing++; importedIds += id
+                }
+                database.setTransactionSuccessful(); call.resolve(JSObject().apply { put("imported", imported); put("existing", existing); put("skipped", skipped); put("ids", org.json.JSONArray(importedIds.distinct())) })
+            } finally { database.endTransaction() }
+        }.start()
     }
 
     @PluginMethod fun queueStats(call: PluginCall) { Thread { val q = database.queue(); val total = q.total(); val first = q.firstCreatedAt(); val last = q.lastActivityAt(); val elapsedMs = if (first != null && last != null && last >= first) last - first else 0L; val processed = total - q.count(QueueStates.PENDING) - q.count(QueueStates.PROCESSING); val ratePerMinute = if (elapsedMs > 0) processed.toDouble() * 60000.0 / elapsedMs else 0.0; call.resolve(JSObject().apply { put("pending", q.count(QueueStates.PENDING)); put("processing", q.count(QueueStates.PROCESSING)); put("sent", q.count(QueueStates.SENT)); put("delivered", q.count(QueueStates.DELIVERED)); put("failed", q.count(QueueStates.FAILED)); put("unknown", q.count(QueueStates.UNKNOWN)); put("cancelled", q.count(QueueStates.CANCELLED)); put("skipped", q.count(QueueStates.SKIPPED)); put("processed", processed); put("total", total); put("elapsedMs", elapsedMs); put("ratePerMinute", ratePerMinute); put("contacts", database.contacts().count()) }) }.start() }

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Sms } from '../services/sms';
-import type { CampaignRecord, ContactListRecord, ContactRecord, DiagnosticRecord, MessageTemplateRecord } from '../services/sms';
+import type { CampaignRecord, ContactListRecord, ContactRecord, DeviceContactRecord, DiagnosticRecord, MessageTemplateRecord } from '../services/sms';
 import { classifyPhone, correctLegacyPhone, csvCell, findDuplicates, parseContactsFile } from '../services/contacts';
 import type { ImportProgress } from '../services/contacts';
 import type { SmsDiagnostic, SmsResult } from '../types/sms';
@@ -31,10 +31,15 @@ type AppContextValue = {
   requestSendPermission: () => Promise<void>;
   requestPhoneStatePermission: () => Promise<void>;
   requestNotificationPermission: () => Promise<void>;
+  requestContactsPermission: () => Promise<boolean>;
+  getDeviceContacts: () => Promise<DeviceContactRecord[]>;
+  importDeviceContacts: (contacts: DeviceContactRecord[]) => Promise<number[]>;
   importContacts: (file: File, options: { listName: string; authorize: boolean; correctLegacy: boolean }, onProgress?: (progress: ImportProgress) => void) => Promise<{ saved: number; skipped: number; duplicates: number; errors: { row: number; reason: string }[]; legacyIds: number[]; importedIds: number[] }>;
   authorizeContacts: (ids: number[], authorized: boolean, source?: string) => Promise<number>;
   saveContact: (contact: { id?: number; name: string; phone: string; authorized: boolean; unsubscribed?: boolean; company?: string; city?: string; state?: string }) => Promise<void>;
-  deleteContacts: (ids: number[]) => Promise<void>;
+  deleteContacts: (ids: number[]) => Promise<{ deleted: number; blocked: number }>;
+  removeContactsFromList: (listId: number, ids: number[]) => Promise<number>;
+  correctLegacyContacts: (ids: number[]) => Promise<{ corrected: number; conflicts: number; failed: number }>;
   toggleUnsubscribe: (ids: number[]) => Promise<void>;
   createList: (options: { name: string; description?: string; contactIds: number[] }) => Promise<void>;
   updateList: (options: { id: number; name: string; description?: string; contactIds: number[] }) => Promise<void>;
@@ -127,6 +132,9 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const requestSendPermission = useCallback(async () => { const response = await Sms.requestSendPermission(); setNotice({ text: response.granted ? 'Permissão SEND_SMS concedida.' : 'Permissão SEND_SMS não concedida.', tone: response.granted ? 'success' : 'danger' }); await refresh(); }, [refresh]);
   const requestPhoneStatePermission = useCallback(async () => { const response = await Sms.requestPhoneStatePermission(); setNotice({ text: response.granted ? 'Permissão de estado telefônico concedida.' : 'READ_PHONE_STATE não concedida.', tone: response.granted ? 'success' : 'danger' }); await refresh(); }, [refresh]);
   const requestNotificationPermission = useCallback(async () => { const response = await Sms.requestNotificationPermission(); setNotice({ text: response.granted ? 'Permissão de notificações concedida.' : 'Permissão de notificações não concedida.', tone: response.granted ? 'success' : 'danger' }); await refresh(); }, [refresh]);
+  const requestContactsPermission = useCallback(async () => { const response = await Sms.requestContactsPermission(); setNotice({ text: response.granted ? 'Permissão para ler a agenda concedida.' : 'Permissão READ_CONTACTS não concedida. Tente novamente ou habilite-a nas configurações do Android.', tone: response.granted ? 'success' : 'danger' }); return response.granted; }, []);
+  const getDeviceContacts = useCallback(async () => (await Sms.getDeviceContacts()).contacts, []);
+  const importDeviceContacts = useCallback(async (deviceContacts: DeviceContactRecord[]) => { const result = await Sms.importDeviceContacts({ contacts: deviceContacts.map(contact => ({ name: contact.name, phone: contact.phone, normalizedPhone: normalizePhone(contact.phone), phoneClassification: classifyPhone(contact.phone) })) }); await refresh(); setNotice({ text: `${result.imported} contato(s) importado(s) da agenda; ${result.existing} já existia(m); ${result.skipped} ignorado(s).`, tone: 'success' }); return result.ids; }, [refresh]);
 
   const importContacts = useCallback(async (file: File, options: { listName: string; authorize: boolean; correctLegacy: boolean }, onProgress?: (progress: ImportProgress) => void) => {
     let parsed;
@@ -157,7 +165,9 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     await refresh();
   }, [refresh]);
 
-  const deleteContacts = useCallback(async (ids: number[]) => { if (ids.length === 0) return; await Sms.deleteContacts({ ids }); await refresh(); }, [refresh]);
+  const deleteContacts = useCallback(async (ids: number[]) => { if (ids.length === 0) return { deleted: 0, blocked: 0 }; const result = await Sms.deleteContacts({ ids }); await refresh(); return result; }, [refresh]);
+  const removeContactsFromList = useCallback(async (listId: number, ids: number[]) => { if (!ids.length) return 0; const result = await Sms.removeContactsFromList({ listId, ids }); await refresh(); return result.removed; }, [refresh]);
+  const correctLegacyContacts = useCallback(async (ids: number[]) => { const candidates = contacts.filter(contact => ids.includes(contact.id) && classifyPhone(contact.phone) === 'MOBILE_LEGACY_CANDIDATE'); const corrections = candidates.map(contact => { const phone = correctLegacyPhone(contact.phone); return { id: contact.id, phone, normalizedPhone: normalizePhone(phone) }; }); const result = await Sms.correctLegacyContacts({ corrections }); await refresh(); setNotice({ text: `${result.corrected} corrigido(s); ${result.conflicts} conflito(s); ${result.failed} falha(s).`, tone: result.conflicts || result.failed ? 'danger' : 'success' }); return result; }, [contacts, refresh]);
   const toggleUnsubscribe = useCallback(async (ids: number[]) => { const selected = contacts.filter(contact => ids.includes(contact.id)); const unsubscribed = selected.some(contact => !contact.unsubscribed); for (const contact of selected) await Sms.upsertContact({ ...contact, normalizedPhone: contact.normalizedPhone, unsubscribed }); await refresh(); }, [contacts, refresh]);
   const createList = useCallback(async (options: { name: string; description?: string; contactIds: number[] }) => { await Sms.createContactList(options); await refresh(); }, [refresh]);
   const updateList = useCallback(async (options: { id: number; name: string; description?: string; contactIds: number[] }) => { await Sms.updateContactList(options); await refresh(); }, [refresh]);
@@ -231,7 +241,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     ]);
   }, [labRows]);
 
-  const value = useMemo<AppContextValue>(() => ({ diagnostic, contacts, lists, templates, campaigns, results, diagnosticEvents, queueStats, selectedSubscriptionId, setSelectedSubscriptionId, refresh, notice, setNotice, sendSms, requestSendPermission, requestPhoneStatePermission, requestNotificationPermission, importContacts, authorizeContacts, saveContact, deleteContacts, toggleUnsubscribe, createList, updateList, deleteList, saveTemplate, deleteTemplate, campaignDraft, updateCampaignDraft, prepareCampaign, resetCampaignDraft, createCampaignAndQueue, startQueue, pauseQueue, stopQueue, labRows, labRunning, labNotice, runLaboratory, stopLaboratory, exportContactsCsv, exportHistoryCsv, exportLabCsv }), [authorizeContacts, campaignDraft, campaigns, contacts, createCampaignAndQueue, createList, deleteContacts, deleteList, deleteTemplate, diagnostic, diagnosticEvents, exportContactsCsv, exportHistoryCsv, exportLabCsv, importContacts, labNotice, labRows, labRunning, lists, notice, pauseQueue, prepareCampaign, refresh, requestNotificationPermission, requestPhoneStatePermission, requestSendPermission, resetCampaignDraft, results, runLaboratory, saveContact, saveTemplate, selectedSubscriptionId, sendSms, startQueue, stopLaboratory, stopQueue, templates, toggleUnsubscribe, updateCampaignDraft, updateList]);
+  const value = useMemo<AppContextValue>(() => ({ diagnostic, contacts, lists, templates, campaigns, results, diagnosticEvents, queueStats, selectedSubscriptionId, setSelectedSubscriptionId, refresh, notice, setNotice, sendSms, requestSendPermission, requestPhoneStatePermission, requestNotificationPermission, requestContactsPermission, getDeviceContacts, importDeviceContacts, importContacts, authorizeContacts, saveContact, deleteContacts, removeContactsFromList, correctLegacyContacts, toggleUnsubscribe, createList, updateList, deleteList, saveTemplate, deleteTemplate, campaignDraft, updateCampaignDraft, prepareCampaign, resetCampaignDraft, createCampaignAndQueue, startQueue, pauseQueue, stopQueue, labRows, labRunning, labNotice, runLaboratory, stopLaboratory, exportContactsCsv, exportHistoryCsv, exportLabCsv }), [authorizeContacts, campaignDraft, campaigns, contacts, correctLegacyContacts, createCampaignAndQueue, createList, deleteContacts, deleteList, deleteTemplate, diagnostic, diagnosticEvents, exportContactsCsv, exportHistoryCsv, exportLabCsv, getDeviceContacts, importContacts, importDeviceContacts, labNotice, labRows, lists, notice, pauseQueue, prepareCampaign, refresh, removeContactsFromList, requestContactsPermission, requestNotificationPermission, requestPhoneStatePermission, requestSendPermission, resetCampaignDraft, results, runLaboratory, saveContact, saveTemplate, selectedSubscriptionId, sendSms, startQueue, stopLaboratory, stopQueue, templates, toggleUnsubscribe, updateCampaignDraft, updateList]);
   return <SmsAppContext.Provider value={value}>{children}</SmsAppContext.Provider>;
 }
 

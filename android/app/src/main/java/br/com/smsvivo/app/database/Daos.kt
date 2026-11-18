@@ -15,9 +15,12 @@ interface ContactDao {
     @Query("SELECT * FROM contacts WHERE originalPhone = :phone LIMIT 1") fun byOriginalPhone(phone: String): ContactEntity?
     @Query("SELECT * FROM contacts ORDER BY name COLLATE NOCASE") fun all(): List<ContactEntity>
     @Query("SELECT * FROM contacts WHERE id = :id") fun find(id: Long): ContactEntity?
+    @Query("SELECT * FROM contacts WHERE id IN (:ids)") fun findByIds(ids: List<Long>): List<ContactEntity>
     @Query("DELETE FROM contacts WHERE id IN (:ids)") fun delete(ids: List<Long>)
     @Query("SELECT COUNT(*) FROM contacts") fun count(): Int
     @Query("UPDATE contacts SET authorized = :authorized, updatedAt = :now WHERE id IN (:ids) AND unsubscribed = 0") fun updateAuthorization(ids: List<Long>, authorized: Boolean, now: Long): Int
+    @Query("UPDATE contacts SET phone = :phone, normalizedPhone = :normalizedPhone, phoneClassification = :phoneClassification, correctedAt = :correctedAt, updatedAt = :now WHERE id = :id") fun updateCorrectedPhone(id: Long, phone: String, normalizedPhone: String, phoneClassification: String, correctedAt: Long, now: Long): Int
+    @Query("SELECT DISTINCT contactId FROM queue_items WHERE contactId IN (:ids) AND state IN ('PENDING', 'PROCESSING')") fun activeQueueContactIds(ids: List<Long>): List<Long>
 }
 
 @Dao
@@ -63,9 +66,11 @@ interface ListDao {
     @Query("DELETE FROM contact_lists WHERE id = :id") fun delete(id: Long)
     @Insert(onConflict = OnConflictStrategy.IGNORE) fun addMember(member: ContactListMembershipEntity)
     @Query("DELETE FROM contact_list_memberships WHERE listId = :listId AND contactId IN (:contactIds)") fun removeMembers(listId: Long, contactIds: List<Long>)
+    @Query("DELETE FROM contact_list_memberships WHERE contactId IN (:contactIds)") fun removeMembersFromAll(contactIds: List<Long>)
     @Query("DELETE FROM contact_list_memberships WHERE listId = :listId") fun removeAllMembers(listId: Long)
     @Transaction fun replaceMembers(list: ContactListEntity, contactIds: List<Long>) { update(list); removeAllMembers(list.id); contactIds.forEach { addMember(ContactListMembershipEntity(list.id, it)) } }
     @Query("SELECT contactId FROM contact_list_memberships WHERE listId = :listId") fun memberIds(listId: Long): List<Long>
+    @Query("SELECT listId FROM contact_list_memberships WHERE contactId = :contactId") fun listIdsForContact(contactId: Long): List<Long>
 }
 
 @Dao

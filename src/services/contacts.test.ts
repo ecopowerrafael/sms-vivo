@@ -27,4 +27,5 @@ describe('contact import', () => {
     expect(classifyPhone('000')).toBe('INVALID');
   });
   it('corrects only eligible legacy mobile numbers and preserves the original separately', () => { expect(correctLegacyPhone('1187654321')).toBe('+5511987654321'); expect(() => correctLegacyPhone('1133334444')).toThrow(); });
+  it('does not add a second ninth digit or alter a complete mobile', () => { expect(classifyPhone('11987654321')).toBe('MOBILE_VALID'); expect(() => correctLegacyPhone('11987654321')).toThrow(); });
 });

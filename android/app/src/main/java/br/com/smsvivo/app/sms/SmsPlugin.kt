@@ -262,12 +262,18 @@ class SmsPlugin : Plugin() {
                 val intent = Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_START).putExtra("intervalMs", intervalMs).putExtra("batchSize", call.getInt("batchSize") ?: 0).putExtra("operationId", operationId)
                 if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
                 call.resolve(JSObject().apply { put("started", true); put("intervalMs", intervalMs); put("batchSize", call.getInt("batchSize") ?: 0); put("operationId", operationId) })
-            } catch (error: Exception) { call.reject("Falha ao iniciar fila: ${error.message ?: "erro desconhecido"}", error) }
+            } catch (error: Exception) {
+                try {
+                    database.settings().upsert(SettingEntity(SmsQueueService.SETTING_PAUSE_REASON, SmsQueueService.PAUSE_SERVICE_ERROR))
+                    database.diagnostics().insert(DiagnosticEventEntity(category = "QUEUE_SERVICE_FAILURE", message = "stage=PLUGIN_START operationId=$operationId error=${error.javaClass.simpleName}: ${error.message ?: "sem mensagem"}"))
+                } catch (_: Exception) { /* preserve the original bridge error */ }
+                call.reject("Falha ao iniciar fila: ${error.message ?: "erro desconhecido"}", error)
+            }
         }.start()
     }
-    @PluginMethod fun resumeQueue(call: PluginCall) { Thread { database.settings().delete(SmsQueueService.SETTING_PAUSE_REASON); val intent = Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_START).putExtra("intervalMs", 0L).putExtra("batchSize", 0); if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent); call.resolve(JSObject().apply { put("resumed", true) }) }.start() }
-    @PluginMethod fun pauseQueue(call: PluginCall) { context.startService(Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_PAUSE)); call.resolve(JSObject().apply { put("paused", true) }) }
-    @PluginMethod fun stopQueue(call: PluginCall) { context.startService(Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_STOP)); call.resolve(JSObject().apply { put("stopped", true) }) }
+    @PluginMethod fun resumeQueue(call: PluginCall) { Thread { try { database.settings().delete(SmsQueueService.SETTING_PAUSE_REASON); val intent = Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_START).putExtra("intervalMs", 0L).putExtra("batchSize", 0); if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent); call.resolve(JSObject().apply { put("resumed", true) }) } catch (error: Exception) { call.reject("Falha ao retomar fila: ${error.message ?: "erro desconhecido"}", error) } }.start() }
+    @PluginMethod fun pauseQueue(call: PluginCall) { try { context.startService(Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_PAUSE)); call.resolve(JSObject().apply { put("paused", true) }) } catch (error: Exception) { call.reject("Falha ao pausar fila: ${error.message ?: "erro desconhecido"}", error) } }
+    @PluginMethod fun stopQueue(call: PluginCall) { try { context.startService(Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_STOP)); call.resolve(JSObject().apply { put("stopped", true) }) } catch (error: Exception) { call.reject("Falha ao interromper fila: ${error.message ?: "erro desconhecido"}", error) } }
 
     @PluginMethod fun send(call: PluginCall) {
         val subscriptionId = call.getInt("subscriptionId") ?: return call.reject("subscriptionId é obrigatório")

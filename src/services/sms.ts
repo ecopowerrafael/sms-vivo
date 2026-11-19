@@ -1,6 +1,9 @@
 import { registerPlugin } from '@capacitor/core';
 import type { SmsDiagnostic, SmsResult } from '../types/sms';
 export interface SmsNativePlugin {
+  getBuildInfo(): Promise<BuildInfo>;
+  probeIntervalBridge(options: { operationId: string; intervalMs: number | string }): Promise<IntervalBridgeProbe>;
+  recordBridgeDiagnostic(options: { operationId: string; method: string; namePresent?: boolean; intervalSeconds?: number; intervalMs?: number | string; intervalMsType?: string; subscriptionId?: number }): Promise<{ recorded: boolean }>;
   diagnose(): Promise<SmsDiagnostic>;
   requestSendPermission(): Promise<{ granted: boolean }>;
   requestPhoneStatePermission(): Promise<{ granted: boolean }>;
@@ -21,7 +24,7 @@ export interface SmsNativePlugin {
   listHistory(): Promise<{ results: SmsResult[] }>;
   listDiagnostics(): Promise<{ events: DiagnosticRecord[] }>;
   enqueue(options: { requestId: string; destination: string; body: string; subscriptionId: number; contactId?: number; campaignId?: number }): Promise<{ queued: boolean; queueItemId: number; requestId: string }>;
-  startQueue(options?: { intervalMs?: number; batchSize?: number }): Promise<{ started: boolean; intervalMs?: number; batchSize?: number }>;
+  startQueue(options?: { operationId?: string; intervalMs?: number; batchSize?: number }): Promise<{ started: boolean; intervalMs?: number; batchSize?: number }>;
   pauseQueue(): Promise<{ paused: boolean }>;
   stopQueue(): Promise<{ stopped: boolean }>;
   resumeQueue(): Promise<{ resumed: boolean }>;
@@ -33,8 +36,11 @@ export interface SmsNativePlugin {
   saveTemplate(options: { id?: number; name: string; body: string }): Promise<{ saved: boolean }>;
   deleteTemplate(options: { id: number }): Promise<{ deleted: boolean }>;
   listCampaigns(): Promise<{ campaigns: CampaignRecord[] }>;
-  createCampaign(options: { name: string; subscriptionId: number; intervalMs?: number; batchSize?: number; listId?: number; templateId?: number }): Promise<{ id: number }>;
+  createCampaign(options: { operationId?: string; name: string; subscriptionId: number; intervalMs?: number; batchSize?: number; listId?: number; templateId?: number }): Promise<{ id: number; intervalMs?: number }>;
 }
+
+export interface BuildInfo { applicationId: string; versionName: string; versionCode: number; commit: string; buildDate: string; buildType: string; }
+export interface IntervalBridgeProbe { operationId: string; fieldPresent: boolean; rawType: string; rawValue?: string; converted?: number; }
 
 export type ContactUpsert = Partial<Pick<ContactRecord, 'id' | 'authorized' | 'unsubscribed' | 'originalPhone' | 'phoneClassification' | 'correctedAt'>> & Omit<ContactRecord, 'id' | 'normalizedPhone' | 'authorized' | 'unsubscribed'> & { normalizedPhone: string };
 

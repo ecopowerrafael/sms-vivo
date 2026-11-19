@@ -7,16 +7,21 @@ def releaseKeystorePassword = System.getenv('SMS_VIVO_KEYSTORE_PASSWORD')
 def releaseKeyAlias = System.getenv('SMS_VIVO_KEY_ALIAS')
 def releaseKeyPassword = System.getenv('SMS_VIVO_KEY_PASSWORD')
 def hasReleaseSigning = releaseKeystorePath && releaseKeystorePassword && releaseKeyAlias && releaseKeyPassword && file(releaseKeystorePath).exists()
+def buildCommit = (System.getenv('SMS_VIVO_COMMIT') ?: 'local').replaceAll('[^A-Za-z0-9._-]', '').take(40) ?: 'local'
+def buildDate = (System.getenv('SMS_VIVO_BUILD_DATE') ?: new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")).replaceAll('[^A-Za-z0-9:+.-]', '').take(40)
 
 android {
     namespace "br.com.smsvivo.app"
     compileSdk rootProject.ext.compileSdkVersion
+    buildFeatures { buildConfig true }
     defaultConfig {
         applicationId "br.com.smsvivo.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0"
+        versionCode 3
+        versionName "1.1.0"
+        buildConfigField "String", "BUILD_COMMIT", "\"${buildCommit}\""
+        buildConfigField "String", "BUILD_DATE", "\"${buildDate}\""
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

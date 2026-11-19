@@ -48,16 +48,52 @@ class SmsPlugin : Plugin() {
     }
 
     /** Capacitor's getLong only accepts JSON Long values; JavaScript integers arrive as Integer. */
-    private fun longArg(call: PluginCall, name: String): Long? {
-        return when (val value = call.data.opt(name)) {
-            null, org.json.JSONObject.NULL -> null
-            is Number -> {
-                val number = value.toDouble()
-                if (!number.isFinite() || number % 1.0 != 0.0) null else value.toLong()
-            }
-            is String -> value.trim().toLongOrNull()
-            else -> null
-        }
+    private fun longArg(call: PluginCall, name: String): Long? = BridgeArgumentReader.readLong(call.data, name)
+
+    private fun safeBridgeValue(value: Any?): String? = when (value) {
+        is Number, is String -> value.toString()
+        null, org.json.JSONObject.NULL -> null
+        else -> "<unsupported>"
+    }
+
+    private fun recordBridgeEvent(category: String, call: PluginCall, operationId: String) {
+        val interval = BridgeArgumentReader.inspect(call.data, "intervalMs")
+        val message = "operationId=$operationId method=$category fieldPresent=${interval.present} rawType=${interval.rawType} rawValue=${interval.rawValue ?: "null"} converted=${interval.converted ?: "null"}"
+        database.diagnostics().insert(DiagnosticEventEntity(category = category, message = message))
+    }
+
+    @PluginMethod fun getBuildInfo(call: PluginCall) {
+        call.resolve(JSObject().apply {
+            put("applicationId", context.packageName)
+            put("versionName", BuildConfig.VERSION_NAME)
+            put("versionCode", BuildConfig.VERSION_CODE)
+            put("commit", BuildConfig.BUILD_COMMIT)
+            put("buildDate", BuildConfig.BUILD_DATE)
+            put("buildType", if (BuildConfig.DEBUG) "debug" else "release")
+        })
+    }
+
+    @PluginMethod fun probeIntervalBridge(call: PluginCall) {
+        val operationId = call.getString("operationId") ?: UUID.randomUUID().toString()
+        val inspection = BridgeArgumentReader.inspect(call.data, "intervalMs")
+        call.resolve(JSObject().apply {
+            put("operationId", operationId)
+            put("fieldPresent", inspection.present)
+            put("rawType", inspection.rawType)
+            put("rawValue", inspection.rawValue)
+            put("converted", inspection.converted)
+        })
+    }
+
+    @PluginMethod fun recordBridgeDiagnostic(call: PluginCall) {
+        val operationId = call.getString("operationId") ?: UUID.randomUUID().toString()
+        Thread {
+            val method = call.getString("method")?.trim().orEmpty().ifBlank { "unknown" }
+            val interval = BridgeArgumentReader.inspect(call.data, "intervalMs")
+            val message = "operationId=$operationId method=$method namePresent=${call.getBoolean("namePresent") ?: false} intervalSeconds=${safeBridgeValue(call.data.opt("intervalSeconds")) ?: "null"} intervalMs=${interval.rawValue ?: "null"} intervalMsType=${call.getString("intervalMsType") ?: interval.rawType} subscriptionId=${call.getInt("subscriptionId") ?: "null"}"
+            database.diagnostics().insert(DiagnosticEventEntity(category = "BRIDGE_JS_TO_NATIVE", message = message))
+            call.resolve(JSObject().apply { put("recorded", true) })
+        }.start()
     }
 
 
@@ -123,7 +159,24 @@ class SmsPlugin : Plugin() {
     @PluginMethod fun saveTemplate(call: PluginCall) { val name = call.getString("name")?.trim().orEmpty(); val body = call.getString("body").orEmpty(); if (name.isBlank() || body.isBlank()) return call.reject("Nome e corpo do modelo são obrigatórios"); Thread { val id = longArg(call, "id"); if (id == null) database.templates().insert(MessageTemplateEntity(name = name, body = body)) else database.templates().update(MessageTemplateEntity(id = id, name = name, body = body)); call.resolve(JSObject().apply { put("saved", true) }) }.start() }
     @PluginMethod fun deleteTemplate(call: PluginCall) { val id = longArg(call, "id") ?: return call.reject("id é obrigatório"); Thread { database.templates().delete(id); call.resolve(JSObject().apply { put("deleted", true) }) }.start() }
     @PluginMethod fun listCampaigns(call: PluginCall) { Thread { val campaigns = org.json.JSONArray(); database.campaigns().all().forEach { c -> campaigns.put(JSObject().apply { put("id", c.id); put("name", c.name); put("state", c.state); put("subscriptionId", c.subscriptionId); put("listId", c.listId); put("createdAt", c.createdAt) }) }; call.resolve(JSObject().apply { put("campaigns", campaigns) }) }.start() }
-    @PluginMethod fun createCampaign(call: PluginCall) { val name = call.getString("name")?.trim().orEmpty(); val subscriptionId = call.getInt("subscriptionId") ?: return call.reject("subscriptionId é obrigatório"); val intervalMs = longArg(call, "intervalMs") ?: return call.reject("intervalMs é obrigatório"); if (name.isBlank()) return call.reject("Nome da campanha é obrigatório"); if (intervalMs < 0) return call.reject("intervalMs inválido"); Thread { try { if (!hasActiveSubscription(subscriptionId)) return@Thread call.reject("SIM selecionado não está ativo"); val id = database.campaigns().insert(CampaignEntity(name = name, listId = longArg(call, "listId"), templateId = longArg(call, "templateId"), subscriptionId = subscriptionId, intervalMs = intervalMs, batchSize = call.getInt("batchSize"))); if (id <= 0) return@Thread call.reject("Não foi possível persistir a campanha"); call.resolve(JSObject().apply { put("id", id); put("intervalMs", intervalMs) }) } catch (error: Exception) { call.reject("Falha ao criar campanha: ${error.message ?: "erro desconhecido"}", error) } }.start() }
+    @PluginMethod fun createCampaign(call: PluginCall) {
+        val operationId = call.getString("operationId") ?: UUID.randomUUID().toString()
+        val name = call.getString("name")?.trim().orEmpty()
+        val subscriptionId = call.getInt("subscriptionId") ?: return call.reject("subscriptionId é obrigatório")
+        Thread {
+            try {
+                recordBridgeEvent("CREATE_CAMPAIGN_PARAMS", call, operationId)
+                val intervalMs = longArg(call, "intervalMs") ?: return@Thread call.reject("CREATE_CAMPAIGN_INTERVAL_MISSING")
+                if (name.isBlank()) return@Thread call.reject("Nome da campanha é obrigatório")
+                if (intervalMs < 0) return@Thread call.reject("intervalMs inválido")
+                if (!hasActiveSubscription(subscriptionId)) return@Thread call.reject("SIM selecionado não está ativo")
+                val id = database.campaigns().insert(CampaignEntity(name = name, listId = longArg(call, "listId"), templateId = longArg(call, "templateId"), subscriptionId = subscriptionId, intervalMs = intervalMs, batchSize = call.getInt("batchSize")))
+                if (id <= 0) return@Thread call.reject("Não foi possível persistir a campanha")
+                database.diagnostics().insert(DiagnosticEventEntity(category = "CAMPAIGN_PERSISTED", message = "operationId=$operationId campaignId=$id intervalMs=$intervalMs"))
+                call.resolve(JSObject().apply { put("id", id); put("intervalMs", intervalMs); put("operationId", operationId) })
+            } catch (error: Exception) { call.reject("Falha ao criar campanha: ${error.message ?: "erro desconhecido"}", error) }
+        }.start()
+    }
 
     @PluginMethod fun authorizeContacts(call: PluginCall) { val ids = call.getArray("ids") ?: return call.reject("ids é obrigatório"); val authorized = call.getBoolean("authorized") ?: false; val source = call.getString("source")?.trim().orEmpty().ifBlank { "bulk-ui" }; Thread { val values = (0 until ids.length()).mapNotNull { ids.optLong(it, -1).takeIf { id -> id > 0 } }; database.beginTransaction(); try { val now = System.currentTimeMillis(); val updated = database.contacts().updateAuthorization(values, authorized, now); database.authorizationEvents().insertAll(values.map { AuthorizationEventEntity(contactId = it, authorized = authorized, source = source, createdAt = now) }); database.setTransactionSuccessful(); call.resolve(JSObject().apply { put("updated", updated) }) } finally { database.endTransaction() } }.start() }
 
@@ -196,7 +249,21 @@ class SmsPlugin : Plugin() {
         Thread { try { if (!hasActiveSubscription(subscriptionId)) return@Thread call.reject("SIM selecionado não está ativo"); val campaign = campaignId?.let { database.campaigns().find(it) }; if (campaignId != null && campaign == null) return@Thread call.reject("Campanha não encontrada"); if (database.queue().byRequestId(requestId) != null) return@Thread call.reject("requestId duplicado"); if (campaignId != null && contactId == null) return@Thread call.reject("contactId é obrigatório para itens de campanha"); if (contactId != null) { val contact = database.contacts().find(contactId); if (contact == null || !SmsEligibility.isEligible(contact)) return@Thread call.reject("Contato não autorizado, descadastrado ou sem celular completo válido para SMS") }; if (!SmsEligibility.isCompleteMobile(destination)) return@Thread call.reject("Destino não possui celular completo válido para SMS"); val sms = context.getSystemService(SmsManager::class.java).createForSubscriptionId(subscriptionId); val partsExpected = sms.divideMessage(body).size; val id = database.queue().insert(QueueItemEntity(requestId = requestId, campaignId = campaignId, contactId = contactId, destination = destination, body = body, subscriptionId = subscriptionId, partsExpected = partsExpected, requestIntervalMs = campaign?.intervalMs)); if (id <= 0) return@Thread call.reject("Não foi possível persistir o item da fila"); call.resolve(JSObject().apply { put("queued", true); put("queueItemId", id); put("requestId", requestId); put("campaignId", campaignId); put("requestIntervalMs", campaign?.intervalMs) }) } catch (error: Exception) { call.reject("Falha ao adicionar contato à fila: ${error.message ?: "erro desconhecido"}", error) } }.start()
     }
 
-    @PluginMethod fun startQueue(call: PluginCall) { val intervalMs = longArg(call, "intervalMs") ?: return call.reject("intervalMs é obrigatório"); if (intervalMs < 0) return call.reject("intervalMs inválido"); Thread { val pause = database.settings().find(SmsQueueService.SETTING_PAUSE_REASON); if (pause != null) return@Thread call.reject("Fila pausada: ${pause.value}. Revise os resultados e use retomar explicitamente."); val intent = Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_START).putExtra("intervalMs", intervalMs).putExtra("batchSize", call.getInt("batchSize") ?: 0); if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent); call.resolve(JSObject().apply { put("started", true); put("intervalMs", intervalMs); put("batchSize", call.getInt("batchSize") ?: 0) }) }.start() }
+    @PluginMethod fun startQueue(call: PluginCall) {
+        val operationId = call.getString("operationId") ?: UUID.randomUUID().toString()
+        Thread {
+            try {
+                recordBridgeEvent("START_QUEUE_PARAMS", call, operationId)
+                val intervalMs = longArg(call, "intervalMs") ?: return@Thread call.reject("START_QUEUE_INTERVAL_MISSING")
+                if (intervalMs < 0) return@Thread call.reject("intervalMs inválido")
+                val pause = database.settings().find(SmsQueueService.SETTING_PAUSE_REASON)
+                if (pause != null) return@Thread call.reject("Fila pausada: ${pause.value}. Revise os resultados e use retomar explicitamente.")
+                val intent = Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_START).putExtra("intervalMs", intervalMs).putExtra("batchSize", call.getInt("batchSize") ?: 0).putExtra("operationId", operationId)
+                if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
+                call.resolve(JSObject().apply { put("started", true); put("intervalMs", intervalMs); put("batchSize", call.getInt("batchSize") ?: 0); put("operationId", operationId) })
+            } catch (error: Exception) { call.reject("Falha ao iniciar fila: ${error.message ?: "erro desconhecido"}", error) }
+        }.start()
+    }
     @PluginMethod fun resumeQueue(call: PluginCall) { Thread { database.settings().delete(SmsQueueService.SETTING_PAUSE_REASON); val intent = Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_START).putExtra("intervalMs", 0L).putExtra("batchSize", 0); if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent); call.resolve(JSObject().apply { put("resumed", true) }) }.start() }
     @PluginMethod fun pauseQueue(call: PluginCall) { context.startService(Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_PAUSE)); call.resolve(JSObject().apply { put("paused", true) }) }
     @PluginMethod fun stopQueue(call: PluginCall) { context.startService(Intent(context, SmsQueueService::class.java).setAction(SmsQueueService.ACTION_STOP)); call.resolve(JSObject().apply { put("stopped", true) }) }

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Sms } from '../services/sms';
-import type { CampaignRecord, ContactListRecord, ContactRecord, DeviceContactRecord, DiagnosticRecord, MessageTemplateRecord, QueueStats } from '../services/sms';
+import type { BuildInfo, CampaignRecord, ContactListRecord, ContactRecord, DeviceContactRecord, DiagnosticRecord, IntervalBridgeProbe, MessageTemplateRecord, QueueStats } from '../services/sms';
 import { classifyPhone, correctLegacyPhone, csvCell, findDuplicates, isSmsEligibleContact, parseContactsFile, smsEligibilityReason, summarizeImportPhones } from '../services/contacts';
 import type { ImportProgress, ImportPhoneCounts, SmsEligibilityReason } from '../services/contacts';
 import type { SmsDiagnostic, SmsResult } from '../types/sms';
@@ -12,11 +12,14 @@ export type AppNotice = { text: string; tone?: 'info' | 'success' | 'danger' };
 export type CampaignDraft = { step: number; name: string; listId: number | ''; recipientIds: number[]; body: string; intervalSeconds: string; batchSize: string; templateId: number | '' };
 export type CampaignProgress = { stage: 'validating' | 'creating' | 'queueing' | 'complete'; completed: number; total: number };
 export type CampaignQueueResult = { campaignId: number; queued: number; eligible: number; ignored: Partial<Record<SmsEligibilityReason, number>> };
+export type BridgeProbeReport = { number: IntervalBridgeProbe; string: IntervalBridgeProbe };
 
 const emptyCampaignDraft: CampaignDraft = { step: 1, name: '', listId: '', recipientIds: [], body: '', intervalSeconds: '0', batchSize: '0', templateId: '' };
 
 type AppContextValue = {
   diagnostic: SmsDiagnostic | null;
+  buildInfo: BuildInfo | null;
+  bridgeProbe: BridgeProbeReport | null;
   contacts: ContactRecord[];
   lists: ContactListRecord[];
   templates: MessageTemplateRecord[];
@@ -27,6 +30,7 @@ type AppContextValue = {
   selectedSubscriptionId: number | '';
   setSelectedSubscriptionId: (id: number | '') => void;
   refresh: () => Promise<void>;
+  runIntervalBridgeProbe: () => Promise<void>;
   notice: AppNotice | null;
   setNotice: (notice: AppNotice | null) => void;
   sendSms: (options: { phone: string; body: string }) => Promise<void>;
@@ -71,6 +75,8 @@ const SmsAppContext = createContext<AppContextValue | undefined>(undefined);
 
 export function SmsAppProvider({ children }: { children: ReactNode }) {
   const [diagnostic, setDiagnostic] = useState<SmsDiagnostic | null>(null);
+  const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
+  const [bridgeProbe, setBridgeProbe] = useState<BridgeProbeReport | null>(null);
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
   const [lists, setLists] = useState<ContactListRecord[]>([]);
   const [templates, setTemplates] = useState<MessageTemplateRecord[]>([]);
@@ -89,8 +95,8 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const labRequests = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
-    const [diagnosticResponse, contactsResponse, statsResponse, historyResponse, diagnosticsResponse, listsResponse, templatesResponse, campaignsResponse] = await Promise.allSettled([
-      Sms.diagnose(), Sms.listContacts(), Sms.queueStats(), Sms.listHistory(), Sms.listDiagnostics(), Sms.listContactLists(), Sms.listTemplates(), Sms.listCampaigns(),
+    const [diagnosticResponse, contactsResponse, statsResponse, historyResponse, diagnosticsResponse, listsResponse, templatesResponse, campaignsResponse, buildInfoResponse] = await Promise.allSettled([
+      Sms.diagnose(), Sms.listContacts(), Sms.queueStats(), Sms.listHistory(), Sms.listDiagnostics(), Sms.listContactLists(), Sms.listTemplates(), Sms.listCampaigns(), Sms.getBuildInfo(),
     ]);
     const nextDiagnostic = diagnosticResponse.status === 'fulfilled' ? diagnosticResponse.value : null;
     if (!nextDiagnostic && diagnosticResponse.status === 'rejected') setNotice({ text: `Diagnóstico indisponível: ${diagnosticResponse.reason instanceof Error ? diagnosticResponse.reason.message : String(diagnosticResponse.reason)}`, tone: 'danger' });
@@ -102,6 +108,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     if (listsResponse.status === 'fulfilled') setLists(listsResponse.value.lists);
     if (templatesResponse.status === 'fulfilled') setTemplates(templatesResponse.value.templates);
     if (campaignsResponse.status === 'fulfilled') setCampaigns(campaignsResponse.value.campaigns);
+    if (buildInfoResponse.status === 'fulfilled') setBuildInfo(buildInfoResponse.value);
     setSelectedSubscriptionIdState(current => current === '' && nextDiagnostic?.subscriptions[0] ? nextDiagnostic.subscriptions[0].id : current);
   }, []);
 
@@ -123,6 +130,16 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const setSelectedSubscriptionId = useCallback((id: number | '') => setSelectedSubscriptionIdState(id), []);
+
+  const runIntervalBridgeProbe = useCallback(async () => {
+    const operationId = crypto.randomUUID();
+    const [numberResult, stringResult] = await Promise.all([
+      Sms.probeIntervalBridge({ operationId, intervalMs: 60000 }),
+      Sms.probeIntervalBridge({ operationId, intervalMs: '60000' }),
+    ]);
+    setBridgeProbe({ number: numberResult, string: stringResult });
+    setNotice({ text: `Ponte validada: número=${numberResult.converted ?? 'ausente'}; texto=${stringResult.converted ?? 'ausente'}.`, tone: 'success' });
+  }, []);
 
   const sendSms = useCallback(async ({ phone, body }: { phone: string; body: string }) => {
     if (selectedSubscriptionId === '') throw new Error('Selecione um chip.');
@@ -195,7 +212,9 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     const intervalMs = Math.round(options.intervalSeconds * 1000);
     if (!Number.isSafeInteger(intervalMs)) throw new Error('O intervalo informado é muito grande.');
     onProgress?.({ stage: 'creating', completed: 0, total: eligible.length });
-    const campaign = await Sms.createCampaign({ name: options.name.trim(), subscriptionId: options.subscriptionId, intervalMs, batchSize: Math.max(0, Math.floor(options.batchSize)), listId: options.listId });
+    const operationId = crypto.randomUUID();
+    await Sms.recordBridgeDiagnostic({ operationId, method: 'createCampaign', namePresent: Boolean(options.name.trim()), intervalSeconds: options.intervalSeconds, intervalMs, intervalMsType: typeof intervalMs, subscriptionId: options.subscriptionId }).catch(() => undefined);
+    const campaign = await Sms.createCampaign({ operationId, name: options.name.trim(), subscriptionId: options.subscriptionId, intervalMs, batchSize: Math.max(0, Math.floor(options.batchSize)), listId: options.listId });
     let queued = 0;
     try {
       for (const contact of eligible) {
@@ -212,7 +231,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     return { campaignId: campaign.id, queued, eligible: eligible.length, ignored };
   }, [campaignDraft.recipientIds, contacts, lists, refresh]);
 
-  const startQueue = useCallback(async ({ intervalSeconds, batchSize }: { intervalSeconds: number; batchSize: number }) => { await Sms.startQueue({ intervalMs: Math.max(0, intervalSeconds) * 1000, batchSize: Math.max(0, Math.floor(batchSize)) }); await refresh(); }, [refresh]);
+  const startQueue = useCallback(async ({ intervalSeconds, batchSize }: { intervalSeconds: number; batchSize: number }) => { const intervalMs = Math.round(Math.max(0, intervalSeconds) * 1000); const operationId = crypto.randomUUID(); await Sms.recordBridgeDiagnostic({ operationId, method: 'startQueue', intervalSeconds, intervalMs, intervalMsType: typeof intervalMs }).catch(() => undefined); await Sms.startQueue({ operationId, intervalMs, batchSize: Math.max(0, Math.floor(batchSize)) }); await refresh(); }, [refresh]);
   const pauseQueue = useCallback(async () => { await Sms.pauseQueue(); await refresh(); }, [refresh]);
   const stopQueue = useCallback(async () => { await Sms.stopQueue(); await refresh(); }, [refresh]);
   const resumeQueue = useCallback(async () => { await Sms.resumeQueue(); await refresh(); setNotice({ text: 'Fila retomada após revisão manual.', tone: 'info' }); }, [refresh]);
@@ -266,7 +285,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     ]);
   }, [labRows]);
 
-  const value = useMemo<AppContextValue>(() => ({ diagnostic, contacts, lists, templates, campaigns, results, diagnosticEvents, queueStats, selectedSubscriptionId, setSelectedSubscriptionId, refresh, notice, setNotice, sendSms, requestSendPermission, requestPhoneStatePermission, requestNotificationPermission, requestContactsPermission, getDeviceContacts, importDeviceContacts, importContacts, authorizeContacts, saveContact, deleteContacts, removeContactsFromList, correctLegacyContacts, toggleUnsubscribe, createList, updateList, deleteList, saveTemplate, deleteTemplate, campaignDraft, updateCampaignDraft, prepareCampaign, resetCampaignDraft, createCampaignAndQueue, startQueue, pauseQueue, stopQueue, resumeQueue, labRows, labRunning, labNotice, runLaboratory, stopLaboratory, exportContactsCsv, exportHistoryCsv, exportLabCsv }), [authorizeContacts, campaignDraft, campaigns, contacts, correctLegacyContacts, createCampaignAndQueue, createList, deleteContacts, deleteList, deleteTemplate, diagnostic, diagnosticEvents, exportContactsCsv, exportHistoryCsv, exportLabCsv, getDeviceContacts, importContacts, importDeviceContacts, labNotice, labRows, lists, notice, pauseQueue, prepareCampaign, refresh, removeContactsFromList, requestContactsPermission, requestNotificationPermission, requestPhoneStatePermission, requestSendPermission, resetCampaignDraft, results, resumeQueue, runLaboratory, saveContact, saveTemplate, selectedSubscriptionId, sendSms, startQueue, stopLaboratory, stopQueue, templates, toggleUnsubscribe, updateCampaignDraft, updateList]);
+  const value = useMemo<AppContextValue>(() => ({ diagnostic, buildInfo, bridgeProbe, contacts, lists, templates, campaigns, results, diagnosticEvents, queueStats, selectedSubscriptionId, setSelectedSubscriptionId, refresh, runIntervalBridgeProbe, notice, setNotice, sendSms, requestSendPermission, requestPhoneStatePermission, requestNotificationPermission, requestContactsPermission, getDeviceContacts, importDeviceContacts, importContacts, authorizeContacts, saveContact, deleteContacts, removeContactsFromList, correctLegacyContacts, toggleUnsubscribe, createList, updateList, deleteList, saveTemplate, deleteTemplate, campaignDraft, updateCampaignDraft, prepareCampaign, resetCampaignDraft, createCampaignAndQueue, startQueue, pauseQueue, stopQueue, resumeQueue, labRows, labRunning, labNotice, runLaboratory, stopLaboratory, exportContactsCsv, exportHistoryCsv, exportLabCsv }), [authorizeContacts, bridgeProbe, buildInfo, campaignDraft, campaigns, contacts, correctLegacyContacts, createCampaignAndQueue, createList, deleteContacts, deleteList, deleteTemplate, diagnostic, diagnosticEvents, exportContactsCsv, exportHistoryCsv, exportLabCsv, getDeviceContacts, importContacts, importDeviceContacts, labNotice, labRows, lists, notice, pauseQueue, prepareCampaign, refresh, removeContactsFromList, requestContactsPermission, requestNotificationPermission, requestPhoneStatePermission, requestSendPermission, resetCampaignDraft, results, resumeQueue, runIntervalBridgeProbe, runLaboratory, saveContact, saveTemplate, selectedSubscriptionId, sendSms, startQueue, stopLaboratory, stopQueue, templates, toggleUnsubscribe, updateCampaignDraft, updateList]);
   return <SmsAppContext.Provider value={value}>{children}</SmsAppContext.Provider>;
 }
 

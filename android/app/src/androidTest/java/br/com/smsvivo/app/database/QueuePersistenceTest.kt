@@ -16,9 +16,11 @@ class QueuePersistenceTest {
     @Before fun setUp() { database = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), SmsDatabase::class.java).allowMainThreadQueries().build() }
     @After fun tearDown() { database.close() }
     @Test fun queueItemPersistsCampaignAssociation() {
-        val campaignId = database.campaigns().insert(CampaignEntity(name = "Campanha", subscriptionId = 1))
-        database.queue().insert(QueueItemEntity(requestId = "campaign-request", campaignId = campaignId, destination = "+5511999999999", body = "teste", subscriptionId = 1))
+        val campaignId = database.campaigns().insert(CampaignEntity(name = "Campanha", subscriptionId = 1, intervalMs = 60000L))
+        assertEquals(60000L, database.campaigns().find(campaignId)?.intervalMs)
+        database.queue().insert(QueueItemEntity(requestId = "campaign-request", campaignId = campaignId, destination = "+5511999999999", body = "teste", subscriptionId = 1, requestIntervalMs = 60000L))
         assertEquals(campaignId, database.queue().byRequestId("campaign-request")?.campaignId)
+        assertEquals(60000L, database.queue().byRequestId("campaign-request")?.requestIntervalMs)
     }
     @Test fun multipartCallbacksAreCountedOnceAndNeedAllSentPartsBeforeDelivery() {
         database.queue().insert(QueueItemEntity(requestId = "multipart-request", destination = "+5511999999999", body = "teste", subscriptionId = 1, state = QueueStates.PROCESSING, partsExpected = 2))

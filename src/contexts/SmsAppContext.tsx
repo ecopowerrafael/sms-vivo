@@ -192,8 +192,10 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     if (!options.name.trim()) throw new Error('Informe o nome da campanha.');
     if (!options.body.trim()) throw new Error('Informe a mensagem da campanha.');
     if (!Number.isFinite(options.intervalSeconds) || options.intervalSeconds < 0) throw new Error('Informe um intervalo válido, igual ou maior que zero.');
+    const intervalMs = Math.round(options.intervalSeconds * 1000);
+    if (!Number.isSafeInteger(intervalMs)) throw new Error('O intervalo informado é muito grande.');
     onProgress?.({ stage: 'creating', completed: 0, total: eligible.length });
-    const campaign = await Sms.createCampaign({ name: options.name.trim(), subscriptionId: options.subscriptionId, intervalMs: options.intervalSeconds * 1000, batchSize: Math.max(0, Math.floor(options.batchSize)), listId: options.listId });
+    const campaign = await Sms.createCampaign({ name: options.name.trim(), subscriptionId: options.subscriptionId, intervalMs, batchSize: Math.max(0, Math.floor(options.batchSize)), listId: options.listId });
     let queued = 0;
     try {
       for (const contact of eligible) {

@@ -5,25 +5,24 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.json.JSONObject
 
 class SmsEligibilityTest {
     @Test fun bridgeReadsJavascriptIntegerAsLong() {
-        val inspection = BridgeArgumentReader.inspect(JSONObject().put("intervalMs", 60000), "intervalMs")
+        val inspection = BridgeArgumentReader.inspectValue(true, 60000)
         assertTrue(inspection.present)
         assertEquals("java.lang.Integer", inspection.rawType)
         assertEquals(60000L, inspection.converted)
     }
 
     @Test fun bridgeReadsNumericStringAsLong() {
-        val inspection = BridgeArgumentReader.inspect(JSONObject().put("intervalMs", "60000"), "intervalMs")
+        val inspection = BridgeArgumentReader.inspectValue(true, "60000")
         assertTrue(inspection.present)
         assertEquals("java.lang.String", inspection.rawType)
         assertEquals(60000L, inspection.converted)
     }
 
     @Test fun bridgeDistinguishesMissingValue() {
-        val inspection = BridgeArgumentReader.inspect(JSONObject(), "intervalMs")
+        val inspection = BridgeArgumentReader.inspectValue(false, null)
         assertFalse(inspection.present)
         assertEquals(null, inspection.converted)
     }

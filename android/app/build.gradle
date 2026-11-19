@@ -7,8 +7,8 @@ def releaseKeystorePassword = System.getenv('SMS_VIVO_KEYSTORE_PASSWORD')
 def releaseKeyAlias = System.getenv('SMS_VIVO_KEY_ALIAS')
 def releaseKeyPassword = System.getenv('SMS_VIVO_KEY_PASSWORD')
 def hasReleaseSigning = releaseKeystorePath && releaseKeystorePassword && releaseKeyAlias && releaseKeyPassword && file(releaseKeystorePath).exists()
-def buildCommit = (System.getenv('SMS_VIVO_COMMIT') ?: 'local').replaceAll('[^A-Za-z0-9._-]', '').take(40) ?: 'local'
-def buildDate = (System.getenv('SMS_VIVO_BUILD_DATE') ?: new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")).replaceAll('[^A-Za-z0-9:+.-]', '').take(40)
+def buildCommit = ((System.getenv('SMS_VIVO_COMMIT') ?: '').trim() ?: 'local').replaceAll('[^A-Za-z0-9._-]', '').take(40) ?: 'local'
+def buildDate = ((System.getenv('SMS_VIVO_BUILD_DATE') ?: '').trim() ?: new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")).replaceAll('[^A-Za-z0-9:+.-]', '').take(40)
 
 android {
     namespace "br.com.smsvivo.app"

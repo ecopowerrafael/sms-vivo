@@ -35,6 +35,7 @@ import br.com.smsvivo.app.database.AuthorizationEventEntity
 import br.com.smsvivo.app.database.SettingEntity
 import br.com.smsvivo.app.receivers.SmsResultReceiver
 import br.com.smsvivo.app.queue.SmsQueueService
+import br.com.smsvivo.app.BuildConfig
 import java.util.UUID
 
 @CapacitorPlugin(name = "Sms", permissions = [Permission(alias = "sms", strings = [Manifest.permission.SEND_SMS]), Permission(alias = "phoneState", strings = [Manifest.permission.READ_PHONE_STATE]), Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS]), Permission(alias = "contacts", strings = [Manifest.permission.READ_CONTACTS])])

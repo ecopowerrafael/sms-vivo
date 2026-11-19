@@ -41,10 +41,12 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - name: Build signed release APK
         if: ${{ inputs.build_release }}
-        run: chmod +x android/gradlew && android/gradlew -p android assembleRelease
+        run: |
+          export SMS_VIVO_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export SMS_VIVO_COMMIT="${GITHUB_SHA}"
+          chmod +x android/gradlew
+          android/gradlew -p android assembleRelease
         env:
-          SMS_VIVO_COMMIT: ${{ github.sha }}
-          SMS_VIVO_BUILD_DATE: ${{ github.run_started_at }}
           SMS_VIVO_KEYSTORE_PATH: ${{ github.workspace }}/android/release.keystore
           SMS_VIVO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           SMS_VIVO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}

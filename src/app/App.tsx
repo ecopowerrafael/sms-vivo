@@ -28,7 +28,7 @@ function RoutedApp() {
 function renderPage(route: AppRoute, navigate: (route: AppRoute) => void) {
   switch (route) {
     case 'contacts': return <ContactsPage onNavigate={navigate} />;
-    case 'campaigns': return <CampaignsPage />;
+    case 'campaigns': return <CampaignsPage onNavigate={navigate} />;
     case 'queue': return <QueuePage />;
     case 'send': return <SendSmsPage />;
     case 'lists': return <ListsPage onNavigate={navigate} />;

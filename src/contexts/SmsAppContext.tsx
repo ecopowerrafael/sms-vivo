@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Sms } from '../services/sms';
 import type { CampaignRecord, ContactListRecord, ContactRecord, DeviceContactRecord, DiagnosticRecord, MessageTemplateRecord, QueueStats } from '../services/sms';
-import { classifyPhone, correctLegacyPhone, csvCell, findDuplicates, parseContactsFile } from '../services/contacts';
-import type { ImportProgress } from '../services/contacts';
+import { classifyPhone, correctLegacyPhone, csvCell, findDuplicates, isSmsEligibleContact, parseContactsFile, smsEligibilityReason, summarizeImportPhones } from '../services/contacts';
+import type { ImportProgress, ImportPhoneCounts, SmsEligibilityReason } from '../services/contacts';
 import type { SmsDiagnostic, SmsResult } from '../types/sms';
 import { filterHistory, type HistoryFilters } from '../utils/history';
 import { normalizePhone, renderTemplate, smsSegments } from '../utils/sms';
@@ -10,6 +10,8 @@ import { normalizePhone, renderTemplate, smsSegments } from '../utils/sms';
 export type LabRow = { requestId: string; destination: string; state: SmsResult['state'] | 'PENDING'; interRequestMs: number; startedAt?: number; responseMs?: number; code?: number; message?: string };
 export type AppNotice = { text: string; tone?: 'info' | 'success' | 'danger' };
 export type CampaignDraft = { step: number; name: string; listId: number | ''; recipientIds: number[]; body: string; intervalSeconds: string; batchSize: string; templateId: number | '' };
+export type CampaignProgress = { stage: 'validating' | 'creating' | 'queueing' | 'complete'; completed: number; total: number };
+export type CampaignQueueResult = { campaignId: number; queued: number; eligible: number; ignored: Partial<Record<SmsEligibilityReason, number>> };
 
 const emptyCampaignDraft: CampaignDraft = { step: 1, name: '', listId: '', recipientIds: [], body: '', intervalSeconds: '0', batchSize: '0', templateId: '' };
 
@@ -34,7 +36,7 @@ type AppContextValue = {
   requestContactsPermission: () => Promise<boolean>;
   getDeviceContacts: () => Promise<DeviceContactRecord[]>;
   importDeviceContacts: (contacts: DeviceContactRecord[]) => Promise<number[]>;
-  importContacts: (file: File, options: { listName: string; authorize: boolean; correctLegacy: boolean }, onProgress?: (progress: ImportProgress) => void) => Promise<{ saved: number; skipped: number; duplicates: number; errors: { row: number; reason: string }[]; legacyIds: number[]; importedIds: number[] }>;
+  importContacts: (file: File, options: { listName: string; authorize: boolean; correctLegacy: boolean }, onProgress?: (progress: ImportProgress) => void) => Promise<{ saved: number; skipped: number; duplicates: number; errors: { row: number; reason: string }[]; legacyIds: number[]; importedIds: number[]; excludedByReason: ImportPhoneCounts }>;
   authorizeContacts: (ids: number[], authorized: boolean, source?: string) => Promise<number>;
   saveContact: (contact: { id?: number; name: string; phone: string; authorized: boolean; unsubscribed?: boolean; company?: string; city?: string; state?: string }) => Promise<void>;
   deleteContacts: (ids: number[]) => Promise<{ deleted: number; blocked: number }>;
@@ -50,7 +52,7 @@ type AppContextValue = {
   updateCampaignDraft: (patch: Partial<CampaignDraft>) => void;
   prepareCampaign: (contactIds: number[]) => void;
   resetCampaignDraft: () => void;
-  createCampaignAndQueue: (options: { name: string; body: string; subscriptionId: number; listId?: number; intervalSeconds: number; batchSize: number; contactIds?: number[] }) => Promise<number>;
+  createCampaignAndQueue: (options: { name: string; body: string; subscriptionId: number; listId?: number; intervalSeconds: number; batchSize: number; contactIds?: number[] }, onProgress?: (progress: CampaignProgress) => void) => Promise<CampaignQueueResult>;
   startQueue: (options: { intervalSeconds: number; batchSize: number }) => Promise<void>;
   pauseQueue: () => Promise<void>;
   stopQueue: () => Promise<void>;
@@ -75,7 +77,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const [campaigns, setCampaigns] = useState<CampaignRecord[]>([]);
   const [results, setResults] = useState<SmsResult[]>([]);
   const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticRecord[]>([]);
-  const [queueStats, setQueueStats] = useState<QueueStats>({ pending: 0, processing: 0, sent: 0, delivered: 0, failed: 0, unknown: 0, cancelled: 0, skipped: 0, processed: 0, total: 0, elapsedMs: 0, ratePerMinute: 0, contacts: 0 });
+  const [queueStats, setQueueStats] = useState<QueueStats>({ pending: 0, processing: 0, sent: 0, delivered: 0, failed: 0, unknown: 0, cancelled: 0, skipped: 0, processed: 0, total: 0, elapsedMs: 0, ratePerMinute: 0, contacts: 0, ineligiblePending: 0 });
   const [selectedSubscriptionId, setSelectedSubscriptionIdState] = useState<number | ''>('');
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(emptyCampaignDraft);
@@ -155,7 +157,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
     if (options.authorize && importedIds.length) await Sms.authorizeContacts({ ids: importedIds, authorized: true, source: `import:${options.listName.trim()}` });
     await refresh();
     onProgress?.({ stage: 'complete', processed: inputs.length, total: inputs.length });
-    return { saved, skipped, duplicates, errors: parsed.errors, legacyIds, importedIds };
+    return { saved, skipped, duplicates, errors: parsed.errors, legacyIds, importedIds, excludedByReason: summarizeImportPhones(inputs) };
   }, [refresh]);
 
   const authorizeContacts = useCallback(async (ids: number[], authorized: boolean, source = 'bulk-ui') => { if (!ids.length) return 0; const result = await Sms.authorizeContacts({ ids, authorized, source }); await refresh(); return result.updated; }, [refresh]);
@@ -179,14 +181,33 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const prepareCampaign = useCallback((ids: number[]) => setCampaignDraft(current => ({ ...current, recipientIds: ids, step: 2 })), []);
   const resetCampaignDraft = useCallback(() => setCampaignDraft(emptyCampaignDraft), []);
 
-  const createCampaignAndQueue = useCallback(async (options: { name: string; body: string; subscriptionId: number; listId?: number; intervalSeconds: number; batchSize: number; contactIds?: number[] }) => {
+  const createCampaignAndQueue = useCallback(async (options: { name: string; body: string; subscriptionId: number; listId?: number; intervalSeconds: number; batchSize: number; contactIds?: number[] }, onProgress?: (progress: CampaignProgress) => void): Promise<CampaignQueueResult> => {
     const source = options.contactIds ?? (options.listId ? lists.find(list => list.id === options.listId)?.contactIds ?? [] : campaignDraft.recipientIds);
-    const eligible = source.map(id => contacts.find(contact => contact.id === id)).filter((contact): contact is ContactRecord => Boolean(contact?.authorized && !contact.unsubscribed));
-    if (eligible.length === 0) throw new Error('Nenhum contato autorizado e não descadastrado foi selecionado.');
-    const campaign = await Sms.createCampaign({ name: options.name.trim() || 'Campanha sem nome', subscriptionId: options.subscriptionId, intervalMs: Math.max(0, options.intervalSeconds) * 1000, batchSize: Math.max(0, Math.floor(options.batchSize)), listId: options.listId });
-    for (const contact of eligible) await Sms.enqueue({ requestId: crypto.randomUUID(), destination: contact.normalizedPhone, body: renderTemplate(options.body, { nome: contact.name, telefone: contact.phone, empresa: contact.company, cidade: contact.city, estado: contact.state }), subscriptionId: options.subscriptionId, contactId: contact.id, campaignId: campaign.id });
+    onProgress?.({ stage: 'validating', completed: 0, total: source.length });
+    const selected = source.map(id => contacts.find(contact => contact.id === id)).filter((contact): contact is ContactRecord => Boolean(contact));
+    const ignored: Partial<Record<SmsEligibilityReason, number>> = {};
+    selected.forEach(contact => { const reason = smsEligibilityReason(contact); if (reason) ignored[reason] = (ignored[reason] ?? 0) + 1; });
+    const eligible = selected.filter(isSmsEligibleContact);
+    if (eligible.length === 0) throw new Error('Nenhum contato com celular válido, autorizado e não descadastrado foi selecionado. Revise os números antes de criar a campanha.');
+    if (!options.name.trim()) throw new Error('Informe o nome da campanha.');
+    if (!options.body.trim()) throw new Error('Informe a mensagem da campanha.');
+    if (!Number.isFinite(options.intervalSeconds) || options.intervalSeconds < 0) throw new Error('Informe um intervalo válido, igual ou maior que zero.');
+    onProgress?.({ stage: 'creating', completed: 0, total: eligible.length });
+    const campaign = await Sms.createCampaign({ name: options.name.trim(), subscriptionId: options.subscriptionId, intervalMs: options.intervalSeconds * 1000, batchSize: Math.max(0, Math.floor(options.batchSize)), listId: options.listId });
+    let queued = 0;
+    try {
+      for (const contact of eligible) {
+        onProgress?.({ stage: 'queueing', completed: queued, total: eligible.length });
+        const result = await Sms.enqueue({ requestId: crypto.randomUUID(), destination: contact.normalizedPhone, body: renderTemplate(options.body, { nome: contact.name, telefone: contact.phone, empresa: contact.company, cidade: contact.city, estado: contact.state }), subscriptionId: options.subscriptionId, contactId: contact.id, campaignId: campaign.id });
+        if (!result.queued) throw new Error(`O Android não confirmou a gravação do contato ${contact.name}.`);
+        queued += 1;
+      }
+    } catch (error) {
+      throw new Error(`Campanha ${campaign.id} criada parcialmente: ${queued} de ${eligible.length} itens gravados. ${error instanceof Error ? error.message : String(error)} Não repita automaticamente; revise a fila.`);
+    }
     await refresh();
-    return eligible.length;
+    onProgress?.({ stage: 'complete', completed: queued, total: eligible.length });
+    return { campaignId: campaign.id, queued, eligible: eligible.length, ignored };
   }, [campaignDraft.recipientIds, contacts, lists, refresh]);
 
   const startQueue = useCallback(async ({ intervalSeconds, batchSize }: { intervalSeconds: number; batchSize: number }) => { await Sms.startQueue({ intervalMs: Math.max(0, intervalSeconds) * 1000, batchSize: Math.max(0, Math.floor(batchSize)) }); await refresh(); }, [refresh]);

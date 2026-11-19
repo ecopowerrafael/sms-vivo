@@ -1,8 +1,10 @@
 import { unzipSync } from 'fflate';
 import type { ContactRecord } from './sms';
 
-export type ContactInput = Omit<ContactRecord, 'id' | 'normalizedPhone'>;
+export type ContactInput = Omit<ContactRecord, 'id' | 'normalizedPhone'> & { phoneCandidates?: Array<{ value: string; classification: PhoneClassification }> };
 export type PhoneClassification = 'MOBILE_VALID' | 'MOBILE_LEGACY_CANDIDATE' | 'LANDLINE' | 'AMBIGUOUS' | 'INVALID' | 'DUPLICATE';
+export type ImportPhoneCounts = Record<PhoneClassification | 'EMPTY', number>;
+export type SmsEligibilityReason = 'LANDLINE' | 'MOBILE_LEGACY_CANDIDATE' | 'INVALID' | 'AMBIGUOUS' | 'UNAUTHORIZED' | 'UNSUBSCRIBED' | 'EMPTY';
 export type ImportRowError = { row: number; reason: string };
 export type ImportProgress = { stage: 'reading' | 'validating' | 'importing' | 'complete'; processed: number; total: number };
 
@@ -31,22 +33,49 @@ export function phoneClassificationLabel(value: PhoneClassification): string {
 
 function mapRow(row: Record<string, unknown>): ContactInput {
   const values = new Map(Object.entries(row).map(([key, value]) => [normalizeHeader(key), textValue(value)]));
-  const firstPhone = values.get('telefone1') || values.get('telefone') || values.get('celular') || '';
-  const secondPhone = values.get('telefone2') || '';
+  const phoneKeys = [...values.keys()].filter(key => /^(telefone\d*|celular\d*|fone\d*)$/.test(key));
+  const phoneCandidates = phoneKeys.map(key => values.get(key) ?? '').filter(Boolean).map(value => ({ value, classification: classifyPhone(value) }));
+  const primary = phoneCandidates.find(candidate => candidate.classification === 'MOBILE_VALID')
+    ?? phoneCandidates.find(candidate => candidate.classification === 'MOBILE_LEGACY_CANDIDATE')
+    ?? phoneCandidates[0];
+  const phone = primary?.value ?? '';
   const name = values.get('nome') || values.get('name') || values.get('nomefantasia') || values.get('razaosocial') || '';
   const company = values.get('empresa') || values.get('company') || values.get('nomefantasia') || values.get('razaosocial') || '';
   return {
     name,
-    phone: firstPhone || secondPhone,
-    originalPhone: firstPhone || secondPhone,
-    phoneClassification: classifyPhone(firstPhone || secondPhone),
+    phone,
+    originalPhone: phone,
+    phoneClassification: classifyPhone(phone),
     correctedAt: undefined,
     company,
     city: values.get('cidade') || values.get('city') || values.get('municipio') || '',
     state: values.get('estado') || values.get('state') || values.get('uf') || '',
     authorized: false,
     unsubscribed: false,
+    phoneCandidates,
   };
+}
+
+export function isSmsEligibleContact(contact: Pick<ContactRecord, 'authorized' | 'unsubscribed' | 'phone'> & { phoneClassification?: PhoneClassification }): boolean {
+  return contact.authorized && !contact.unsubscribed && classifyPhone(contact.phone) === 'MOBILE_VALID';
+}
+
+export function smsEligibilityReason(contact: Pick<ContactRecord, 'authorized' | 'unsubscribed' | 'phone'> & { phoneClassification?: PhoneClassification }): SmsEligibilityReason | null {
+  if (isSmsEligibleContact(contact)) return null;
+  if (contact.unsubscribed) return 'UNSUBSCRIBED';
+  if (!contact.authorized) return 'UNAUTHORIZED';
+  const classification = classifyPhone(contact.phone);
+  return classification === 'LANDLINE' || classification === 'MOBILE_LEGACY_CANDIDATE' || classification === 'INVALID' || classification === 'AMBIGUOUS' ? classification : 'EMPTY';
+}
+
+export function summarizeImportPhones(inputs: ContactInput[]): ImportPhoneCounts {
+  const counts: ImportPhoneCounts = { MOBILE_VALID: 0, MOBILE_LEGACY_CANDIDATE: 0, LANDLINE: 0, AMBIGUOUS: 0, INVALID: 0, DUPLICATE: 0, EMPTY: 0 };
+  inputs.forEach(input => {
+    const candidates = input.phoneCandidates ?? (input.phone ? [{ value: input.phone, classification: classifyPhone(input.phone) }] : []);
+    if (!candidates.length) { counts.EMPTY += 1; return; }
+    candidates.forEach(candidate => { counts[candidate.classification] += 1; });
+  });
+  return counts;
 }
 
 export function parseCsv(text: string): ContactInput[] {
@@ -120,7 +149,7 @@ export async function parseContactsFile(file: File, onProgress?: (progress: Impo
   if (!isXlsx && !file.name.toLowerCase().endsWith('.csv')) throw new Error('Formato não suportado. Selecione um arquivo CSV ou XLSX.');
   const inputs = isXlsx ? await parseXlsx(await file.arrayBuffer()) : parseCsv(await file.text());
   const errors: ImportRowError[] = [];
-  inputs.forEach((contact, index) => { if (!contact.name && !contact.phone) errors.push({ row: index + 2, reason: 'Nome e telefone vazios.' }); });
+  inputs.forEach((contact, index) => { if (!contact.name && !contact.phone) errors.push({ row: index + 2, reason: 'Nome e telefone vazios.' }); else if (!contact.phone) errors.push({ row: index + 2, reason: 'Telefone vazio.' }); });
   onProgress?.({ stage: 'validating', processed: inputs.length, total: inputs.length });
   return { inputs, errors };
 }

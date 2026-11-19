@@ -4,9 +4,10 @@ export function Card({ children, className = '' }: { children: ReactNode; classN
   return <section className={`card ${className}`.trim()}>{children}</section>;
 }
 
-export function Notice({ children, tone = 'info' }: { children?: ReactNode; tone?: 'info' | 'success' | 'danger' }) {
-  if (!children) return null;
-  return <p className={`notice notice-${tone}`} role={tone === 'danger' ? 'alert' : 'status'}>{children}</p>;
+export function Notice({ children, text, tone = 'info' }: { children?: ReactNode; text?: ReactNode; tone?: 'info' | 'success' | 'danger' }) {
+  const content = children ?? text;
+  if (!content) return null;
+  return <p className={`notice notice-${tone}`} role={tone === 'danger' ? 'alert' : 'status'}>{content}</p>;
 }
 
 export function EmptyState({ title, description }: { title: string; description?: string }) {

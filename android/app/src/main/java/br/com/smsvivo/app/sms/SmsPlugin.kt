@@ -19,6 +19,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
 import br.com.smsvivo.app.database.DiagnosticEventEntity
 import br.com.smsvivo.app.database.QueueItemEntity
 import br.com.smsvivo.app.database.QueueStates
@@ -130,21 +131,58 @@ class SmsPlugin : Plugin() {
         val normalized = org.json.JSONArray(); for (i in 0 until array.length()) normalized.put(org.json.JSONObject(array.getString(i))); return normalized
     }
 
-    @PluginMethod fun requestSendPermission(call: PluginCall) { requestPermissionForAlias("sms", call, "smsPermission") }
-    @PluginMethod fun requestPhoneStatePermission(call: PluginCall) { requestPermissionForAlias("phoneState", call, "phoneStatePermission") }
-    @PluginMethod fun requestNotificationPermission(call: PluginCall) { requestPermissionForAlias("notifications", call, "notificationPermission") }
-    @PluginMethod fun requestContactsPermission(call: PluginCall) { requestPermissionForAlias("contacts", call, "contactsPermission") }
+    private fun isPermissionGranted(permission: String): Boolean = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun resolvePermission(call: PluginCall, permission: String) {
+        call.resolve(JSObject().apply { put("granted", isPermissionGranted(permission)) })
+    }
+
+    @PluginMethod fun requestSendPermission(call: PluginCall) {
+        if (isPermissionGranted(Manifest.permission.SEND_SMS)) return resolvePermission(call, Manifest.permission.SEND_SMS)
+        requestPermissionForAlias("sms", call, "smsPermission")
+    }
+
+    @PluginMethod fun requestPhoneStatePermission(call: PluginCall) {
+        if (isPermissionGranted(Manifest.permission.READ_PHONE_STATE)) return resolvePermission(call, Manifest.permission.READ_PHONE_STATE)
+        requestPermissionForAlias("phoneState", call, "phoneStatePermission")
+    }
+
+    @PluginMethod fun requestNotificationPermission(call: PluginCall) {
+        if (Build.VERSION.SDK_INT < 33 || isPermissionGranted(Manifest.permission.POST_NOTIFICATIONS)) return resolvePermission(call, Manifest.permission.POST_NOTIFICATIONS)
+        requestPermissionForAlias("notifications", call, "notificationPermission")
+    }
+
+    @PluginMethod fun requestContactsPermission(call: PluginCall) {
+        if (isPermissionGranted(Manifest.permission.READ_CONTACTS)) return resolvePermission(call, Manifest.permission.READ_CONTACTS)
+        requestPermissionForAlias("contacts", call, "contactsPermission")
+    }
+
+    @PermissionCallback
+    private fun smsPermission(call: PluginCall) = resolvePermission(call, Manifest.permission.SEND_SMS)
+
+    @PermissionCallback
+    private fun phoneStatePermission(call: PluginCall) = resolvePermission(call, Manifest.permission.READ_PHONE_STATE)
+
+    @PermissionCallback
+    private fun notificationPermission(call: PluginCall) = resolvePermission(call, Manifest.permission.POST_NOTIFICATIONS)
+
+    @PermissionCallback
+    private fun contactsPermission(call: PluginCall) = resolvePermission(call, Manifest.permission.READ_CONTACTS)
 
     @PluginMethod fun getDeviceContacts(call: PluginCall) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return call.reject("Permissão READ_CONTACTS não concedida")
         Thread {
-            val array = org.json.JSONArray()
-            val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone._ID, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.CommonDataKinds.Phone.TYPE)
-            context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} COLLATE NOCASE")?.use { cursor ->
-                val contactId = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID); val phoneId = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone._ID); val name = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME); val number = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER); val type = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.TYPE)
-                while (cursor.moveToNext()) array.put(JSObject().apply { put("sourceId", "${cursor.getLong(contactId)}:${cursor.getLong(phoneId)}"); put("contactId", cursor.getLong(contactId)); put("name", cursor.getString(name) ?: "Sem nome"); put("phone", cursor.getString(number) ?: ""); put("type", cursor.getInt(type)) })
+            try {
+                val array = org.json.JSONArray()
+                val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone._ID, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.CommonDataKinds.Phone.TYPE)
+                context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} COLLATE NOCASE")?.use { cursor ->
+                    val contactId = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID); val phoneId = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone._ID); val name = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME); val number = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER); val type = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.TYPE)
+                    while (cursor.moveToNext()) array.put(JSObject().apply { put("sourceId", "${cursor.getLong(contactId)}:${cursor.getLong(phoneId)}"); put("contactId", cursor.getLong(contactId)); put("name", cursor.getString(name) ?: "Sem nome"); put("phone", cursor.getString(number) ?: ""); put("type", cursor.getInt(type)) })
+                }
+                call.resolve(JSObject().apply { put("contacts", array) })
+            } catch (error: Exception) {
+                call.reject("Não foi possível ler a agenda do celular. Verifique a permissão READ_CONTACTS e tente novamente.", error)
             }
-            call.resolve(JSObject().apply { put("contacts", array) })
         }.start()
     }
 

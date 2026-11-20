@@ -21,6 +21,6 @@ public class ExampleInstrumentedTest {
         // Context of the app under test.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
-        assertEquals("br.com.smsvivo.app", appContext.getPackageName());
+        assertEquals("br.com.smsmassa.app", appContext.getPackageName());
     }
 }

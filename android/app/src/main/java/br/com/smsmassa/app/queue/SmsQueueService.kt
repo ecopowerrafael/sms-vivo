@@ -1,4 +1,4 @@
-package br.com.smsvivo.app.queue
+package br.com.smsmassa.app.queue
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -12,22 +12,22 @@ import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import br.com.smsvivo.app.MainActivity
-import br.com.smsvivo.app.R
-import br.com.smsvivo.app.database.DiagnosticEventEntity
-import br.com.smsvivo.app.database.QueueItemEntity
-import br.com.smsvivo.app.database.QueueStates
-import br.com.smsvivo.app.database.SettingEntity
-import br.com.smsvivo.app.database.SmsDatabase
-import br.com.smsvivo.app.receivers.SmsResultReceiver
+import br.com.smsmassa.app.MainActivity
+import br.com.smsmassa.app.R
+import br.com.smsmassa.app.database.DiagnosticEventEntity
+import br.com.smsmassa.app.database.QueueItemEntity
+import br.com.smsmassa.app.database.QueueStates
+import br.com.smsmassa.app.database.SettingEntity
+import br.com.smsmassa.app.database.SmsDatabase
+import br.com.smsmassa.app.receivers.SmsResultReceiver
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 class SmsQueueService : Service() {
     companion object {
-        const val ACTION_START = "br.com.smsvivo.app.queue.START"
-        const val ACTION_PAUSE = "br.com.smsvivo.app.queue.PAUSE"
-        const val ACTION_STOP = "br.com.smsvivo.app.queue.STOP"
+        const val ACTION_START = "br.com.smsmassa.app.queue.START"
+        const val ACTION_PAUSE = "br.com.smsmassa.app.queue.PAUSE"
+        const val ACTION_STOP = "br.com.smsmassa.app.queue.STOP"
         const val SETTING_PAUSE_REASON = "queue.pause.reason"
         const val PAUSE_ANDROID_LIMIT = "ANDROID_LIMIT"
         const val PAUSE_UNKNOWN = "UNKNOWN_RESULT"
@@ -247,7 +247,7 @@ class SmsQueueService : Service() {
         val pause = PendingIntent.getService(this, 1, Intent(this, SmsQueueService::class.java).setAction(if (paused.get()) ACTION_START else ACTION_PAUSE), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 2, Intent(this, SmsQueueService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val open = PendingIntent.getActivity(this, 3, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.mipmap.ic_launcher).setContentTitle("SMS Vivo").setContentText("$processedCount processadas · $pendingCount pendentes").setContentIntent(open).setOngoing(true).addAction(NotificationCompat.Action.Builder(0, if (paused.get()) "Retomar" else "Pausar", pause).build()).addAction(NotificationCompat.Action.Builder(0, "Interromper", stop).build()).build()
+        return NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.mipmap.ic_launcher).setContentTitle("SMS Massa").setContentText("$processedCount processadas · $pendingCount pendentes").setContentIntent(open).setOngoing(true).addAction(NotificationCompat.Action.Builder(0, if (paused.get()) "Retomar" else "Pausar", pause).build()).addAction(NotificationCompat.Action.Builder(0, "Interromper", stop).build()).build()
     }
 
     private fun refreshNotificationCounts() {

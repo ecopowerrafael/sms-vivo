@@ -287,20 +287,20 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
 
   const stopLaboratory = useCallback(() => { labStop.current = true; setLabRunning(false); setLabNotice({ text: 'Interrupção solicitada; nenhuma nova solicitação será iniciada.' }); }, []);
   const exportContactsCsv = useCallback(() => {
-    downloadCsv('sms-vivo-contatos.csv', [
+    downloadCsv('sms-massa-contatos.csv', [
       ['id', 'nome', 'telefone', 'telefoneNormalizado', 'empresa', 'cidade', 'estado', 'autorizado', 'descadastrado'],
       ...contacts.map(contact => [contact.id, contact.name, contact.phone, contact.normalizedPhone, contact.company ?? '', contact.city ?? '', contact.state ?? '', contact.authorized, contact.unsubscribed]),
     ]);
   }, [contacts]);
   const exportHistoryCsv = useCallback((filters: HistoryFilters) => {
     const filtered = filterHistory(results, filters);
-    downloadCsv('sms-vivo-historico.csv', [
+    downloadCsv('sms-massa-historico.csv', [
       ['requestId', 'state', 'code', 'createdAt', 'smsRequestedAt', 'sentAt', 'deliveredAt', 'unknownAt', 'requestIntervalMs', 'lastCallbackAt', 'lastCallbackCode', 'partsExpected', 'sentParts', 'deliveredParts', 'destination', 'campaignId', 'listId', 'subscriptionId', 'message'],
       ...filtered.map(result => [result.requestId, result.state, result.code ?? '', result.createdAt ?? '', result.smsRequestedAt ?? '', result.sentAt, result.deliveredAt ?? '', result.unknownAt ?? '', result.requestIntervalMs ?? '', result.lastCallbackAt ?? '', result.lastCallbackCode ?? '', result.partsExpected ?? '', result.sentParts ?? '', result.deliveredParts ?? '', result.destination ?? '', result.campaignId ?? '', result.listId ?? '', result.subscriptionId ?? '', result.message ?? '']),
     ]);
   }, [results]);
   const exportLabCsv = useCallback(() => {
-    downloadCsv('sms-vivo-laboratorio.csv', [
+    downloadCsv('sms-massa-laboratorio.csv', [
       ['requestId', 'destination', 'state', 'interRequestMs', 'responseMs', 'code', 'message'],
       ...labRows.map(row => [row.requestId, row.destination, row.state, row.interRequestMs, row.responseMs ?? '', row.code ?? '', row.message ?? '']),
     ]);

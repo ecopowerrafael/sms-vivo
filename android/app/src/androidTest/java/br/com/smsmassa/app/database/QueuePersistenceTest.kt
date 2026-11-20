@@ -1,4 +1,4 @@
-package br.com.smsvivo.app.database
+package br.com.smsmassa.app.database
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider

@@ -1,4 +1,4 @@
-package br.com.smsvivo.app.sms
+package br.com.smsmassa.app.sms
 
 import org.json.JSONObject
 

@@ -1,4 +1,4 @@
-package br.com.smsvivo.app.queue
+package br.com.smsmassa.app.queue
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

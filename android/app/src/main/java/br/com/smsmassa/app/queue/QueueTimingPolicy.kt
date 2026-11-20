@@ -1,4 +1,4 @@
-package br.com.smsvivo.app.queue
+package br.com.smsmassa.app.queue
 
 class QueueTimingPolicy(private val now: () -> Long = { System.currentTimeMillis() }) {
     fun delayUntilNextRequest(lastConclusiveAt: Long?, intervalMs: Long): Long {

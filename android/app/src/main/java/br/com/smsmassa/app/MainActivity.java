@@ -1,7 +1,7 @@
-package br.com.smsvivo.app;
+package br.com.smsmassa.app;
 
 import com.getcapacitor.BridgeActivity;
-import br.com.smsvivo.app.sms.SmsPlugin;
+import br.com.smsmassa.app.sms.SmsPlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override

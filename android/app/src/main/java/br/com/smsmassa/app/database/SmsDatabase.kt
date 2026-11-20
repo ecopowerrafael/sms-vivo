@@ -1,4 +1,4 @@
-package br.com.smsvivo.app.database
+package br.com.smsmassa.app.database
 
 import android.content.Context
 import androidx.room.Database
@@ -54,7 +54,7 @@ abstract class SmsDatabase : RoomDatabase() {
         private val MIGRATION_4_5 = object : Migration(4, 5) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("CREATE TABLE IF NOT EXISTS authorization_events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, contactId INTEGER NOT NULL, authorized INTEGER NOT NULL, source TEXT NOT NULL, createdAt INTEGER NOT NULL)"); database.execSQL("CREATE INDEX IF NOT EXISTS index_authorization_events_contactId ON authorization_events(contactId)"); database.execSQL("CREATE INDEX IF NOT EXISTS index_authorization_events_createdAt ON authorization_events(createdAt)") } }
         private val MIGRATION_5_6 = object : Migration(5, 6) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE queue_items ADD COLUMN requestIntervalMs INTEGER"); database.execSQL("ALTER TABLE queue_items ADD COLUMN smsRequestedAt INTEGER"); database.execSQL("ALTER TABLE queue_items ADD COLUMN lastCallbackAt INTEGER"); database.execSQL("ALTER TABLE queue_items ADD COLUMN lastCallbackCode INTEGER"); database.execSQL("ALTER TABLE queue_items ADD COLUMN unknownAt INTEGER") } }
         private val MIGRATION_6_7 = object : Migration(6, 7) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE contact_lists ADD COLUMN origin TEXT") } }
-        fun get(context: Context): SmsDatabase = instance ?: synchronized(this) { instance ?: Room.databaseBuilder(context.applicationContext, SmsDatabase::class.java, "sms-vivo.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it } }
+        fun get(context: Context): SmsDatabase = instance ?: synchronized(this) { instance ?: Room.databaseBuilder(context.applicationContext, SmsDatabase::class.java, "sms-massa.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it } }
     }
 }
 

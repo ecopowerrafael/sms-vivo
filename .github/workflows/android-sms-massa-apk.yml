@@ -1,0 +1,62 @@
+name: Android SMS Massa APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v5
+      - name: Require SMS Massa branch
+        run: test "${GITHUB_REF_NAME}" = "codex/sms-massa"
+      - uses: actions/setup-node@v5
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx cap sync android
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21' }
+      - name: Prepare SMS Massa release keystore
+        shell: bash
+        run: |
+          test -n "${SMS_MASSA_KEYSTORE_BASE64}" || { echo "SMS_MASSA_KEYSTORE_BASE64 is required"; exit 1; }
+          test -n "${SMS_MASSA_KEYSTORE_PASSWORD}" || { echo "SMS_MASSA_KEYSTORE_PASSWORD is required"; exit 1; }
+          test -n "${SMS_MASSA_KEY_ALIAS}" || { echo "SMS_MASSA_KEY_ALIAS is required"; exit 1; }
+          test -n "${SMS_MASSA_KEY_PASSWORD}" || { echo "SMS_MASSA_KEY_PASSWORD is required"; exit 1; }
+          echo "${SMS_MASSA_KEYSTORE_BASE64}" | base64 --decode > android/sms-massa-release.keystore
+          test -s android/sms-massa-release.keystore
+          keytool -list -keystore android/sms-massa-release.keystore -storepass "${SMS_MASSA_KEYSTORE_PASSWORD}" -alias "${SMS_MASSA_KEY_ALIAS}" >/dev/null
+        env:
+          SMS_MASSA_KEYSTORE_BASE64: ${{ secrets.SMS_MASSA_KEYSTORE_BASE64 }}
+          SMS_MASSA_KEYSTORE_PASSWORD: ${{ secrets.SMS_MASSA_KEYSTORE_PASSWORD }}
+          SMS_MASSA_KEY_ALIAS: ${{ secrets.SMS_MASSA_KEY_ALIAS }}
+          SMS_MASSA_KEY_PASSWORD: ${{ secrets.SMS_MASSA_KEY_PASSWORD }}
+      - name: Build signed release APK
+        shell: bash
+        run: |
+          export SMS_MASSA_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export SMS_MASSA_COMMIT="${GITHUB_SHA}"
+          chmod +x android/gradlew
+          android/gradlew -p android assembleRelease
+        env:
+          SMS_MASSA_KEYSTORE_PATH: ${{ github.workspace }}/android/sms-massa-release.keystore
+          SMS_MASSA_KEYSTORE_PASSWORD: ${{ secrets.SMS_MASSA_KEYSTORE_PASSWORD }}
+          SMS_MASSA_KEY_ALIAS: ${{ secrets.SMS_MASSA_KEY_ALIAS }}
+          SMS_MASSA_KEY_PASSWORD: ${{ secrets.SMS_MASSA_KEY_PASSWORD }}
+      - name: Verify release identity and signature
+        shell: bash
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          AAPT=$(find "${ANDROID_HOME}/build-tools" -type f -name aapt | sort | tail -n1)
+          APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort | tail -n1)
+          test -f "${APK}"
+          "${AAPT}" dump badging "${APK}" | grep -E "package: name='br.com.smsmassa.app' versionCode='6' versionName='1.4.0'"
+          "${APKSIGNER}" verify --verbose --print-certs "${APK}"
+          echo "Commit incorporado: ${GITHUB_SHA}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sms-massa-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk

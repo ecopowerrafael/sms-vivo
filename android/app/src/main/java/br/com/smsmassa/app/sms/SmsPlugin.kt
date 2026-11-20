@@ -1,4 +1,4 @@
-package br.com.smsvivo.app.sms
+package br.com.smsmassa.app.sms
 
 import android.Manifest
 import android.app.PendingIntent
@@ -20,23 +20,23 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
-import br.com.smsvivo.app.database.DiagnosticEventEntity
-import br.com.smsvivo.app.database.QueueItemEntity
-import br.com.smsvivo.app.database.QueueStates
-import br.com.smsvivo.app.database.SmsDatabase
-import br.com.smsvivo.app.database.ContactEntity
-import br.com.smsvivo.app.database.ContactListEntity
-import br.com.smsvivo.app.database.ContactListMembershipEntity
-import br.com.smsvivo.app.database.MessageTemplateEntity
-import br.com.smsvivo.app.database.CampaignEntity
-import br.com.smsvivo.app.database.ContactPatch
-import br.com.smsvivo.app.database.mergeContact
-import br.com.smsvivo.app.database.SmsResultPhase
-import br.com.smsvivo.app.database.AuthorizationEventEntity
-import br.com.smsvivo.app.database.SettingEntity
-import br.com.smsvivo.app.receivers.SmsResultReceiver
-import br.com.smsvivo.app.queue.SmsQueueService
-import br.com.smsvivo.app.BuildConfig
+import br.com.smsmassa.app.database.DiagnosticEventEntity
+import br.com.smsmassa.app.database.QueueItemEntity
+import br.com.smsmassa.app.database.QueueStates
+import br.com.smsmassa.app.database.SmsDatabase
+import br.com.smsmassa.app.database.ContactEntity
+import br.com.smsmassa.app.database.ContactListEntity
+import br.com.smsmassa.app.database.ContactListMembershipEntity
+import br.com.smsmassa.app.database.MessageTemplateEntity
+import br.com.smsmassa.app.database.CampaignEntity
+import br.com.smsmassa.app.database.ContactPatch
+import br.com.smsmassa.app.database.mergeContact
+import br.com.smsmassa.app.database.SmsResultPhase
+import br.com.smsmassa.app.database.AuthorizationEventEntity
+import br.com.smsmassa.app.database.SettingEntity
+import br.com.smsmassa.app.receivers.SmsResultReceiver
+import br.com.smsmassa.app.queue.SmsQueueService
+import br.com.smsmassa.app.BuildConfig
 import java.util.UUID
 
 @CapacitorPlugin(name = "Sms", permissions = [Permission(alias = "sms", strings = [Manifest.permission.SEND_SMS]), Permission(alias = "phoneState", strings = [Manifest.permission.READ_PHONE_STATE]), Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS]), Permission(alias = "contacts", strings = [Manifest.permission.READ_CONTACTS])])

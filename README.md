@@ -1,6 +1,6 @@
-# SMS Vivo
+# SMS Massa
 
-Aplicativo Android offline-first para envio de SMS pelo chip do próprio aparelho, usando `SmsManager` e seleção explícita da assinatura. O núcleo atual inclui diagnóstico, permissão, envio unitário, contatos, importação CSV/XLSX, Room, fila persistente e serviço foreground iniciado pelo usuário.
+Aplicativo Android offline-first para envio de SMS pelo chip do próprio aparelho, usando `SmsManager` e seleção explícita da assinatura. O SMS Massa é uma instalação independente do SMS Vivo; o núcleo atual inclui diagnóstico, permissão, envio unitário, contatos, importação CSV/XLSX, Room, fila persistente e serviço foreground iniciado pelo usuário.
 
 ## Desenvolvimento
 
@@ -13,7 +13,7 @@ npx cap sync android
 cd android && ./gradlew assembleDebug
 ```
 
-O build Android usa Java 21. O `applicationId` permanente é `br.com.smsvivo.app` e o `versionCode` atual é `2`; toda versão distribuída como atualização deve aumentar o `versionCode` sem alterar o `applicationId`.
+O build Android usa Java 21. O `applicationId` do SMS Massa é `br.com.smsmassa.app` e o `versionCode` atual é `6`; toda versão distribuída como atualização deve aumentar o `versionCode` sem alterar o `applicationId`.
 
 O APK debug fica em `android/app/build/outputs/apk/debug/app-debug.apk`. O workflow rápido `Android source compile` executa os testes JavaScript, os testes unitários Kotlin/JUnit, compila os testes instrumentados sem executá-los, gera esse APK e publica o artifact `sms-vivo-debug-apk` a partir da branch `codex/stage2-robustness`.
 

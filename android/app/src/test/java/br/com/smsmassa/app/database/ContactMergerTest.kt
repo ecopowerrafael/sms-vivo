@@ -1,4 +1,4 @@
-package br.com.smsvivo.app.database
+package br.com.smsmassa.app.database
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">SMS Vivo</string>
-    <string name="title_activity_main">SMS Vivo</string>
-    <string name="package_name">br.com.smsvivo.app</string>
-    <string name="custom_url_scheme">br.com.smsvivo.app</string>
+    <string name="app_name">SMS Massa</string>
+    <string name="title_activity_main">SMS Massa</string>
+    <string name="package_name">br.com.smsmassa.app</string>
+    <string name="custom_url_scheme">br.com.smsmassa.app</string>
 </resources>

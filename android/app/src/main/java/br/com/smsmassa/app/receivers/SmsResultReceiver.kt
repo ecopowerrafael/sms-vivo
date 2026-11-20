@@ -1,21 +1,21 @@
-package br.com.smsvivo.app.receivers
+package br.com.smsmassa.app.receivers
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import br.com.smsvivo.app.database.QueueStates
-import br.com.smsvivo.app.database.SmsDatabase
-import br.com.smsvivo.app.database.DiagnosticEventEntity
-import br.com.smsvivo.app.database.SmsPartCallbackEntity
-import br.com.smsvivo.app.database.SmsResultPhase
-import br.com.smsvivo.app.database.SettingEntity
-import br.com.smsvivo.app.queue.SmsQueueService
+import br.com.smsmassa.app.database.QueueStates
+import br.com.smsmassa.app.database.SmsDatabase
+import br.com.smsmassa.app.database.DiagnosticEventEntity
+import br.com.smsmassa.app.database.SmsPartCallbackEntity
+import br.com.smsmassa.app.database.SmsResultPhase
+import br.com.smsmassa.app.database.SettingEntity
+import br.com.smsmassa.app.queue.SmsQueueService
 
 class SmsResultReceiver : BroadcastReceiver() {
     companion object {
-        const val ACTION_SENT = "br.com.smsvivo.app.SMS_SENT"
-        const val ACTION_DELIVERED = "br.com.smsvivo.app.SMS_DELIVERED"
-        const val ACTION_UI_RESULT = "br.com.smsvivo.app.SMS_RESULT_EVENT"
+        const val ACTION_SENT = "br.com.smsmassa.app.SMS_SENT"
+        const val ACTION_DELIVERED = "br.com.smsmassa.app.SMS_DELIVERED"
+        const val ACTION_UI_RESULT = "br.com.smsmassa.app.SMS_RESULT_EVENT"
     }
     override fun onReceive(context: Context, intent: Intent) {
         val requestId = intent.getStringExtra("requestId") ?: return

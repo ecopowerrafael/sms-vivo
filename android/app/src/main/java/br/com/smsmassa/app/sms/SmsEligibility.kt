@@ -1,6 +1,6 @@
-package br.com.smsvivo.app.sms
+package br.com.smsmassa.app.sms
 
-import br.com.smsvivo.app.database.ContactEntity
+import br.com.smsmassa.app.database.ContactEntity
 
 object SmsEligibility {
     const val MOBILE_VALID = "MOBILE_VALID"

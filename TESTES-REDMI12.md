@@ -1,7 +1,7 @@
 # Checklist Redmi 12 — Android 14 / HyperOS 1
 
 - [ ] Instalar o APK debug por instalação direta.
-- [ ] Confirmar que o app aparece como SMS Vivo e abre sem crash.
+- [ ] Confirmar que o app aparece como SMS Massa e abre sem crash, ao lado do SMS Vivo.
 - [ ] Conceder ou diagnosticar `SEND_SMS`.
 - [ ] Confirmar que a assinatura Vivo aparece e selecionar o slot correto.
 - [ ] Testar número nacional normalizado e mensagem GSM-7.

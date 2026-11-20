@@ -34,6 +34,10 @@ Depois do push na branch `codex/sms-massa`, abra a aba **Actions**, aguarde o wo
 
 O workflow verifica `applicationId=br.com.smsmassa.app`, `versionCode=6`, `versionName=1.4.0` e a assinatura do APK. Se uma keystore diferente for usada, o Android não aceitará a atualização sobre a instalação anterior; será necessário desinstalar, perdendo os dados locais.
 
+## Painel local Windows
+
+O esqueleto independente do futuro painel fica em [`desktop/`](desktop/README.md). Ele usa React + Vite no frontend e Fastify na API local. Nesta etapa há somente navegação, inventário vazio de dispositivos e tela de espera por pareamento; não existe envio remoto nem alteração do serviço Android.
+
 Para verificar a assinatura de um APK instalado ou recebido, compare o certificado exibido por `apksigner verify --print-certs app-release.apk` com o certificado da instalação existente. O certificado precisa ser o mesmo; os valores dos Secrets nunca devem ser impressos nos logs. O Room mantém a cadeia de migrations 1→2→3→4→5. As migrations 3→4 adicionam classificação/origem/correção de telefones e relacionamento pai das listas; a 4→5 adiciona o histórico de autorização. Nenhuma delas remove contatos, memberships ou dados da fila.
 
 ## Arquitetura

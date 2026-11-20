@@ -1,5 +1,6 @@
 import { unzipSync } from 'fflate';
-import type { ContactRecord } from './sms';
+import type { ContactRecord, DeviceContactRecord } from './sms';
+import { normalizePhone } from '../utils/sms';
 
 export type ContactInput = Omit<ContactRecord, 'id' | 'normalizedPhone'> & { phoneCandidates?: Array<{ value: string; classification: PhoneClassification }> };
 export type PhoneClassification = 'MOBILE_VALID' | 'MOBILE_LEGACY_CANDIDATE' | 'LANDLINE' | 'AMBIGUOUS' | 'INVALID' | 'DUPLICATE';
@@ -7,6 +8,22 @@ export type ImportPhoneCounts = Record<PhoneClassification | 'EMPTY', number>;
 export type SmsEligibilityReason = 'LANDLINE' | 'MOBILE_LEGACY_CANDIDATE' | 'INVALID' | 'AMBIGUOUS' | 'UNAUTHORIZED' | 'UNSUBSCRIBED' | 'EMPTY';
 export type ImportRowError = { row: number; reason: string };
 export type ImportProgress = { stage: 'reading' | 'validating' | 'importing' | 'complete'; processed: number; total: number };
+export type DeviceContactCandidate = DeviceContactRecord & {
+  normalizedPhone: string;
+  phoneClassification: PhoneClassification;
+  duplicateCount: number;
+  sourceIds: string[];
+};
+export type DeviceContactAnalysis = {
+  recordsFound: number;
+  completeMobileRecords: number;
+  duplicateRecords: number;
+  landlineExcluded: number;
+  legacyCandidates: number;
+  invalidOrAmbiguous: number;
+  uniqueMobileAvailable: number;
+  candidates: DeviceContactCandidate[];
+};
 
 export function normalizeHeader(value: unknown): string { return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 export function normalizeSearch(value: unknown): string { return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
@@ -19,6 +36,43 @@ export function classifyPhone(value: string): PhoneClassification {
   if (/^[6-9]/.test(subscriber)) return 'MOBILE_LEGACY_CANDIDATE';
   if (/^[2-5]/.test(subscriber)) return 'LANDLINE';
   return 'AMBIGUOUS';
+}
+
+function contactNameScore(name: string): number {
+  const normalized = name.trim().toLocaleLowerCase();
+  if (!normalized || normalized === 'sem nome' || normalized === 'contato da agenda') return 0;
+  return normalized.replace(/[^\p{L}\p{N}]/gu, '').length;
+}
+
+export function deduplicateDeviceContacts(records: DeviceContactRecord[]): DeviceContactAnalysis {
+  const groups = new Map<string, DeviceContactCandidate>();
+  let duplicateRecords = 0;
+  let completeMobileRecords = 0;
+  let landlineExcluded = 0;
+  let legacyCandidates = 0;
+  let invalidOrAmbiguous = 0;
+
+  records.forEach(record => {
+    const classification = classifyPhone(record.phone);
+    if (classification === 'MOBILE_VALID') completeMobileRecords += 1;
+    else if (classification === 'LANDLINE') landlineExcluded += 1;
+    else if (classification === 'MOBILE_LEGACY_CANDIDATE') legacyCandidates += 1;
+    else invalidOrAmbiguous += 1;
+
+    let normalizedPhone: string;
+    try { normalizedPhone = normalizePhone(record.phone); } catch { normalizedPhone = `invalid:${record.sourceId}`; }
+    const existing = groups.get(normalizedPhone);
+    if (!existing) {
+      groups.set(normalizedPhone, { ...record, normalizedPhone, phoneClassification: classification, duplicateCount: 1, sourceIds: [record.sourceId] });
+      return;
+    }
+    duplicateRecords += 1;
+    const preferred = contactNameScore(record.name) > contactNameScore(existing.name) ? record : existing;
+    groups.set(normalizedPhone, { ...existing, ...preferred, normalizedPhone, phoneClassification: existing.phoneClassification === 'MOBILE_VALID' || classification !== 'MOBILE_VALID' ? existing.phoneClassification : classification, duplicateCount: existing.duplicateCount + 1, sourceIds: [...existing.sourceIds, record.sourceId] });
+  });
+
+  const candidates = [...groups.values()];
+  return { recordsFound: records.length, completeMobileRecords, duplicateRecords, landlineExcluded, legacyCandidates, invalidOrAmbiguous, uniqueMobileAvailable: candidates.filter(candidate => candidate.phoneClassification === 'MOBILE_VALID').length, candidates };
 }
 
 export function correctLegacyPhone(value: string): string {

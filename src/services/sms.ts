@@ -10,7 +10,7 @@ export interface SmsNativePlugin {
   requestNotificationPermission(): Promise<{ granted: boolean }>;
   requestContactsPermission(): Promise<{ granted: boolean }>;
   getDeviceContacts(): Promise<{ contacts: DeviceContactRecord[] }>;
-  importDeviceContacts(options: { contacts: Array<{ name: string; phone: string; normalizedPhone: string; phoneClassification?: string }> }): Promise<{ imported: number; existing: number; skipped: number; ids: number[] }>;
+  importDeviceContacts(options: { contacts: Array<{ name: string; phone: string; normalizedPhone: string; phoneClassification?: string }> }): Promise<{ imported: number; existing: number; skipped: number; duplicates?: number; rejected?: number; ids: number[] }>;
   send(options: { subscriptionId: number; destination: string; body: string; requestId: string }): Promise<{ accepted: boolean; requestId: string }>;
   addListener(eventName: 'smsResult', listenerFunc: (result: SmsResult) => void): Promise<{ remove: () => Promise<void> }>;
   listContacts(): Promise<{ contacts: ContactRecord[] }>;

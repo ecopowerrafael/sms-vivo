@@ -38,4 +38,18 @@ class SmsEligibilityTest {
     @Test fun unsubscribedMobileIsRejected() {
         assertFalse(SmsEligibility.isEligible(ContactEntity(name = "Opt-out", phone = "11999990000", normalizedPhone = "+5511999990000", authorized = true, unsubscribed = true)))
     }
+
+    @Test fun normalizesBrazilianMobileRepresentationsToTheSameKey() {
+        assertEquals("+5515997813981", SmsEligibility.normalizeBrazilian("(15) 99781-3981"))
+        assertEquals("+5515997813981", SmsEligibility.normalizeBrazilian("15997813981"))
+        assertEquals("+5515997813981", SmsEligibility.normalizeBrazilian("+55 15 99781-3981"))
+        assertEquals(SmsEligibility.MOBILE_VALID, SmsEligibility.classify("5515997813981"))
+    }
+
+    @Test fun classifiesFixedLegacyAndAmbiguousNumbersBeforeImport() {
+        assertEquals(SmsEligibility.LANDLINE, SmsEligibility.classify("1133334444"))
+        assertEquals(SmsEligibility.MOBILE_LEGACY_CANDIDATE, SmsEligibility.classify("1188887777"))
+        assertEquals(SmsEligibility.AMBIGUOUS, SmsEligibility.classify("1100000000"))
+        assertEquals(SmsEligibility.INVALID, SmsEligibility.classify("000"))
+    }
 }

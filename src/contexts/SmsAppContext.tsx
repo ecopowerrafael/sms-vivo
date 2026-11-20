@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Sms } from '../services/sms';
 import type { BuildInfo, CampaignRecord, ContactListRecord, ContactRecord, DeviceContactRecord, DiagnosticRecord, IntervalBridgeProbe, MessageTemplateRecord, QueueStats } from '../services/sms';
-import { classifyPhone, correctLegacyPhone, csvCell, findDuplicates, isSmsEligibleContact, parseContactsFile, smsEligibilityReason, summarizeImportPhones } from '../services/contacts';
+import { classifyPhone, correctLegacyPhone, csvCell, deduplicateDeviceContacts, findDuplicates, isSmsEligibleContact, parseContactsFile, smsEligibilityReason, summarizeImportPhones } from '../services/contacts';
 import type { ImportProgress, ImportPhoneCounts, SmsEligibilityReason } from '../services/contacts';
 import type { SmsDiagnostic, SmsResult } from '../types/sms';
 import { filterHistory, type HistoryFilters } from '../utils/history';
@@ -154,7 +154,7 @@ export function SmsAppProvider({ children }: { children: ReactNode }) {
   const requestNotificationPermission = useCallback(async () => { const response = await Sms.requestNotificationPermission(); setNotice({ text: response.granted ? 'Permissão de notificações concedida.' : 'Permissão de notificações não concedida.', tone: response.granted ? 'success' : 'danger' }); await refresh(); }, [refresh]);
   const requestContactsPermission = useCallback(async () => { const response = await Sms.requestContactsPermission(); setNotice({ text: response.granted ? 'Permissão para ler a agenda concedida.' : 'Permissão READ_CONTACTS não concedida. Tente novamente ou habilite-a nas configurações do Android.', tone: response.granted ? 'success' : 'danger' }); return response.granted; }, []);
   const getDeviceContacts = useCallback(async () => (await Sms.getDeviceContacts()).contacts, []);
-  const importDeviceContacts = useCallback(async (deviceContacts: DeviceContactRecord[]) => { const result = await Sms.importDeviceContacts({ contacts: deviceContacts.map(contact => ({ name: contact.name, phone: contact.phone, normalizedPhone: normalizePhone(contact.phone), phoneClassification: classifyPhone(contact.phone) })) }); await refresh(); setNotice({ text: `${result.imported} contato(s) importado(s) da agenda; ${result.existing} já existia(m); ${result.skipped} ignorado(s).`, tone: 'success' }); return result.ids; }, [refresh]);
+  const importDeviceContacts = useCallback(async (deviceContacts: DeviceContactRecord[]) => { const analysis = deduplicateDeviceContacts(deviceContacts); const candidates = analysis.candidates.filter(contact => contact.phoneClassification === 'MOBILE_VALID'); if (!candidates.length) { setNotice({ text: 'Nenhum celular completo e único foi selecionado.', tone: 'danger' }); return []; } const result = await Sms.importDeviceContacts({ contacts: candidates.map(contact => ({ name: contact.name, phone: contact.phone, normalizedPhone: contact.normalizedPhone, phoneClassification: contact.phoneClassification })) }); await refresh(); setNotice({ text: `${result.imported} contato(s) importado(s) da agenda; ${result.existing} já existia(m); ${result.duplicates ?? analysis.duplicateRecords} duplicado(s); ${result.rejected ?? result.skipped} rejeitado(s).`, tone: 'success' }); return result.ids; }, [refresh]);
 
   const importContacts = useCallback(async (file: File, options: { listName: string; authorize: boolean; correctLegacy: boolean }, onProgress?: (progress: ImportProgress) => void) => {
     let parsed;

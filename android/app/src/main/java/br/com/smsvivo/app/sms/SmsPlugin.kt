@@ -267,13 +267,36 @@ class SmsPlugin : Plugin() {
     @PluginMethod fun importDeviceContacts(call: PluginCall) {
         val contacts = call.getArray("contacts") ?: return call.reject("contacts é obrigatório")
         Thread {
-            var imported = 0; var existing = 0; var skipped = 0; val importedIds = mutableListOf<Long>(); database.beginTransaction()
+            var imported = 0; var existing = 0; var skipped = 0; var duplicates = 0; var rejected = 0; val importedIds = mutableListOf<Long>()
+            val unique = linkedMapOf<String, org.json.JSONObject>()
+            fun nameScore(value: String): Int = value.trim().lowercase().count { it.isLetterOrDigit() }
+            for (index in 0 until contacts.length()) {
+                val item = contacts.optJSONObject(index) ?: continue
+                val phone = item.optString("phone").trim()
+                val normalized = SmsEligibility.normalizeBrazilian(phone)
+                if (normalized == null || SmsEligibility.classify(phone) != SmsEligibility.MOBILE_VALID) { rejected++; continue }
+                val previous = unique[normalized]
+                if (previous != null) {
+                    duplicates++
+                    if (nameScore(item.optString("name")) > nameScore(previous.optString("name"))) unique[normalized] = item
+                } else unique[normalized] = item
+            }
+            database.beginTransaction()
             try {
-                for (index in 0 until contacts.length()) {
-                    val item = contacts.optJSONObject(index) ?: continue; val name = item.optString("name").trim().ifBlank { "Contato da agenda" }; val phone = item.optString("phone").trim(); val normalized = item.optString("normalizedPhone").trim(); if (phone.isBlank() || normalized.isBlank()) { skipped++; continue }
-                    val old = database.contacts().byNormalizedPhone(normalized); val original = old?.originalPhone ?: phone; val classification = old?.phoneClassification ?: item.optString("phoneClassification").ifBlank { null }; val entity = mergeContact(old, ContactPatch(name, phone, normalized, original, true, classification, true, null, false, null, false, null, false, null, false, null, false, null, false, null, false)); val id = if (old == null) database.contacts().insert(entity) else { database.contacts().update(entity); old.id }; if (old == null) imported++ else existing++; importedIds += id
+                unique.forEach { (normalized, item) ->
+                    val phone = item.optString("phone").trim()
+                    val old = database.contacts().byNormalizedPhone(normalized)
+                    if (old != null) {
+                        if (old.unsubscribed) { rejected++; return@forEach }
+                        existing++; importedIds += old.id
+                    } else {
+                        val name = item.optString("name").trim().ifBlank { "Contato da agenda" }
+                        val entity = ContactEntity(name = name, phone = phone, normalizedPhone = normalized, originalPhone = phone, phoneClassification = SmsEligibility.MOBILE_VALID)
+                        val id = database.contacts().insert(entity)
+                        if (id > 0) { imported++; importedIds += id } else { skipped++ }
+                    }
                 }
-                database.setTransactionSuccessful(); call.resolve(JSObject().apply { put("imported", imported); put("existing", existing); put("skipped", skipped); put("ids", org.json.JSONArray(importedIds.distinct())) })
+                database.setTransactionSuccessful(); call.resolve(JSObject().apply { put("imported", imported); put("existing", existing); put("skipped", skipped); put("duplicates", duplicates); put("rejected", rejected); put("ids", org.json.JSONArray(importedIds.distinct())) })
             } finally { database.endTransaction() }
         }.start()
     }

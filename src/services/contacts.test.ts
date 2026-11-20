@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPhone, correctLegacyPhone, csvCell, findDuplicates, isSmsEligibleContact, mapContactRows, parseCsv, summarizeImportPhones } from './contacts';
+import { classifyPhone, correctLegacyPhone, csvCell, deduplicateDeviceContacts, findDuplicates, isSmsEligibleContact, mapContactRows, parseCsv, summarizeImportPhones } from './contacts';
 import { normalizePhone } from '../utils/sms';
 
 describe('contact import', () => {
@@ -40,6 +40,35 @@ describe('contact import', () => {
   });
   it('corrects only eligible legacy mobile numbers and preserves the original separately', () => { expect(correctLegacyPhone('1187654321')).toBe('+5511987654321'); expect(() => correctLegacyPhone('1133334444')).toThrow(); });
   it('does not add a second ninth digit or alter a complete mobile', () => { expect(classifyPhone('11987654321')).toBe('MOBILE_VALID'); expect(() => correctLegacyPhone('11987654321')).toThrow(); });
+  it('deduplicates Brazilian mobile formats by normalized phone and preserves the most readable name', () => {
+    const result = deduplicateDeviceContacts([
+      { sourceId: '1:1', contactId: 1, name: 'A', phone: '(15) 99781-3981' },
+      { sourceId: '1:2', contactId: 1, name: 'Ana Maria Oficina', phone: '15997813981' },
+      { sourceId: '2:1', contactId: 2, name: 'Ana Maria Oficina', phone: '+55 15 99781-3981' },
+      { sourceId: '3:1', contactId: 3, name: 'Outro', phone: '5515997813981' },
+    ]);
+    expect(result.recordsFound).toBe(4);
+    expect(result.duplicateRecords).toBe(3);
+    expect(result.uniqueMobileAvailable).toBe(1);
+    expect(result.candidates[0]).toMatchObject({ normalizedPhone: '+5515997813981', name: 'Ana Maria Oficina', duplicateCount: 4 });
+  });
+  it('keeps different numbers from the same source contact and excludes fixed/legacy numbers from direct selection', () => {
+    const result = deduplicateDeviceContacts([
+      { sourceId: '4:1', contactId: 4, name: 'Empresa', phone: '1133334444' },
+      { sourceId: '4:2', contactId: 4, name: 'Empresa', phone: '1188887777' },
+      { sourceId: '5:1', contactId: 5, name: 'Móvel', phone: '11999990000' },
+    ]);
+    expect(result.candidates).toHaveLength(3);
+    expect(result.landlineExcluded).toBe(1);
+    expect(result.legacyCandidates).toBe(1);
+    expect(result.uniqueMobileAvailable).toBe(1);
+  });
+  it('handles more than ten thousand records without duplicating selection keys', () => {
+    const records = Array.from({ length: 11000 }, (_, index) => ({ sourceId: `bulk:${index}`, contactId: index, name: `Contato ${index}`, phone: `119${String(index).padStart(8, '0')}` }));
+    const result = deduplicateDeviceContacts(records);
+    expect(result.recordsFound).toBe(11000);
+    expect(new Set(result.candidates.filter(item => item.phoneClassification === 'MOBILE_VALID').map(item => item.normalizedPhone)).size).toBe(result.uniqueMobileAvailable);
+  });
   it('requires a complete valid mobile for SMS eligibility', () => {
     expect(isSmsEligibleContact({ authorized: true, unsubscribed: false, phone: '1133334444' })).toBe(false);
     expect(isSmsEligibleContact({ authorized: true, unsubscribed: false, phone: '11999990000' })).toBe(true);

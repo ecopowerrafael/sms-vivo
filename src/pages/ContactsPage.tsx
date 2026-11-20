@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AppRoute } from '../app/routes';
 import { useSmsApp } from '../contexts/SmsAppContext';
 import { classifyPhone, correctLegacyPhone, isSmsEligibleContact, normalizeSearch, parseContactsFile, phoneClassificationLabel, summarizeImportPhones } from '../services/contacts';
@@ -7,13 +7,14 @@ import type { ContactInput, ImportProgress } from '../services/contacts';
 import { Card, EmptyState, Notice, SectionHeading } from '../components/ui/Primitives';
 
 export function ContactsPage({ onNavigate }: { onNavigate: (route: AppRoute) => void }) {
-  const { contacts, lists, importContacts, authorizeContacts, saveContact, deleteContacts, correctLegacyContacts, updateList, prepareCampaign, exportContactsCsv, notice, setNotice } = useSmsApp();
+  const { contacts, lists, importContacts, authorizeContacts, saveContact, deleteContacts, correctLegacyContacts, updateList, prepareCampaign, exportContactsCsv, notice, setNotice, loadContactsPaged } = useSmsApp();
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('ALL'); const [selected, setSelected] = useState<number[]>([]); const [editingId, setEditingId] = useState<number>();
-  const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [authorized, setAuthorized] = useState(false); const [company, setCompany] = useState(''); const [page, setPage] = useState(1); const pageSize = 50;
+  const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [authorized, setAuthorized] = useState(false); const [company, setCompany] = useState(''); const [page, setPage] = useState(1); const [total, setTotal] = useState(0); const pageSize = 50;
   const [importFile, setImportFile] = useState<File | null>(null); const [listName, setListName] = useState(''); const [confirmAuthorization, setConfirmAuthorization] = useState(false); const [correctLegacy, setCorrectLegacy] = useState(false); const [analysis, setAnalysis] = useState<ContactInput[] | null>(null); const [importProgress, setImportProgress] = useState<ImportProgress | null>(null); const [analyzing, setAnalyzing] = useState(false);
   const [targetListId, setTargetListId] = useState<number | ''>(''); const [correctionSelected, setCorrectionSelected] = useState<number[]>([]);
+  useEffect(() => { loadContactsPaged({ query: search, limit: pageSize, offset: (page - 1) * pageSize }).then(response => setTotal(response.total)).catch(error => setNotice({ text: error instanceof Error ? error.message : String(error), tone: 'danger' })); }, [loadContactsPaged, page, search, setNotice]);
   const filtered = useMemo(() => contacts.filter(contact => (!search.trim() || normalizeSearch(`${contact.name} ${contact.phone} ${contact.company ?? ''}`).includes(normalizeSearch(search))) && (filter === 'ALL' || (filter === 'AUTHORIZED' && contact.authorized && !contact.unsubscribed) || (filter === 'PENDING' && !contact.authorized && !contact.unsubscribed) || (filter === 'UNSUBSCRIBED' && contact.unsubscribed))), [contacts, filter, search]);
-  const visible = filtered.slice((page - 1) * pageSize, page * pageSize); const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const visible = filtered; const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const legacyCandidates = useMemo(() => contacts.filter(contact => classifyPhone(contact.phone) === 'MOBILE_LEGACY_CANDIDATE'), [contacts]);
   const analysisCounts = useMemo(() => summarizeImportPhones(analysis ?? []), [analysis]);
   async function analyzeFile() { if (!importFile || !listName.trim()) { setNotice({ text: 'Informe o nome da lista e selecione um arquivo.', tone: 'danger' }); return; } try { setAnalyzing(true); const parsed = await parseContactsFile(importFile); setAnalysis(parsed.inputs); setNotice({ text: `${parsed.inputs.length} registro(s) analisado(s). Confirme a importação para gravar.`, tone: 'info' }); } catch (error) { setNotice({ text: error instanceof Error ? error.message : String(error), tone: 'danger' }); } finally { setAnalyzing(false); } }

@@ -61,4 +61,16 @@ class QueuePersistenceTest {
         assertEquals(QueueStates.PROCESSING, database.queue().byRequestId("recent")?.state)
         assertEquals(QueueStates.UNKNOWN, database.queue().byRequestId("stale")?.state)
     }
+
+    @Test fun listPagingReturnsOnlyRequestedPageAndEligibleCount() {
+        val listId = database.lists().insert(ContactListEntity(name = "Agenda do celular", origin = "DEVICE_CONTACTS"))
+        val eligible = database.contacts().insert(ContactEntity(name = "Elegível", phone = "11999990000", normalizedPhone = "+5511999990000", phoneClassification = "MOBILE_VALID", authorized = true))
+        val pending = database.contacts().insert(ContactEntity(name = "Pendente", phone = "11988887777", normalizedPhone = "+5511988887777", phoneClassification = "MOBILE_VALID", authorized = false))
+        database.lists().addMember(ContactListMembershipEntity(listId, eligible))
+        database.lists().addMember(ContactListMembershipEntity(listId, pending))
+        assertEquals(2, database.contacts().countByList(listId, ""))
+        assertEquals(1, database.contacts().countEligibleByList(listId))
+        assertEquals(1, database.contacts().pageByList(listId, "", 1, 0).size)
+        assertEquals(1, database.contacts().pageByList(listId, "Pendente", 50, 0).size)
+    }
 }

@@ -13,7 +13,7 @@ object QueueStates {
 data class ContactEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val phone: String, val normalizedPhone: String, val originalPhone: String? = null, val phoneClassification: String? = null, val correctedAt: Long? = null, val company: String? = null, val city: String? = null, val state: String? = null, val customFieldsJson: String? = null, val authorized: Boolean = false, val unsubscribed: Boolean = false, val createdAt: Long = System.currentTimeMillis(), val updatedAt: Long = System.currentTimeMillis())
 
 @Entity(tableName = "contact_lists")
-data class ContactListEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val description: String? = null, val parentListId: Long? = null, val createdAt: Long = System.currentTimeMillis())
+data class ContactListEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val description: String? = null, val parentListId: Long? = null, val origin: String? = null, val createdAt: Long = System.currentTimeMillis())
 
 @Entity(tableName = "contact_list_memberships", primaryKeys = ["listId", "contactId"], indices = [Index(value = ["contactId"])])
 data class ContactListMembershipEntity(val listId: Long, val contactId: Long, val addedAt: Long = System.currentTimeMillis())

@@ -186,13 +186,26 @@ class SmsPlugin : Plugin() {
         }.start()
     }
 
+    private fun contactJson(c: ContactEntity): JSObject = JSObject().apply { put("id", c.id); put("name", c.name); put("phone", c.phone); put("normalizedPhone", c.normalizedPhone); put("originalPhone", c.originalPhone); put("phoneClassification", c.phoneClassification); put("correctedAt", c.correctedAt); put("company", c.company); put("city", c.city); put("state", c.state); put("customFieldsJson", c.customFieldsJson); put("authorized", c.authorized); put("unsubscribed", c.unsubscribed) }
+
     @PluginMethod fun listContacts(call: PluginCall) {
-        Thread { val array = org.json.JSONArray(); database.contacts().all().forEach { c -> array.put(JSObject().apply { put("id", c.id); put("name", c.name); put("phone", c.phone); put("normalizedPhone", c.normalizedPhone); put("originalPhone", c.originalPhone); put("phoneClassification", c.phoneClassification); put("correctedAt", c.correctedAt); put("company", c.company); put("city", c.city); put("state", c.state); put("customFieldsJson", c.customFieldsJson); put("authorized", c.authorized); put("unsubscribed", c.unsubscribed) }) }; call.resolve(JSObject().apply { put("contacts", array) }) }.start()
+        Thread { val array = org.json.JSONArray(); database.contacts().all().forEach { array.put(contactJson(it)) }; call.resolve(JSObject().apply { put("contacts", array) }) }.start()
     }
 
-    @PluginMethod fun listContactLists(call: PluginCall) { Thread { val lists = org.json.JSONArray(); database.lists().all().forEach { list -> lists.put(JSObject().apply { put("id", list.id); put("name", list.name); put("description", list.description); put("parentListId", list.parentListId); put("contactIds", org.json.JSONArray(database.lists().memberIds(list.id))) }) }; call.resolve(JSObject().apply { put("lists", lists) }) }.start() }
-    @PluginMethod fun createContactList(call: PluginCall) { val name = call.getString("name")?.trim().orEmpty(); if (name.isBlank()) return call.reject("Nome da lista é obrigatório"); Thread { val id = database.lists().insert(ContactListEntity(name = name, description = call.getString("description"))); val ids = call.getArray("contactIds"); if (ids != null) (0 until ids.length()).mapNotNull { ids.optLong(it, -1).takeIf { value -> value > 0 } }.forEach { database.lists().addMember(ContactListMembershipEntity(id, it)) }; call.resolve(JSObject().apply { put("id", id) }) }.start() }
-    @PluginMethod fun updateContactList(call: PluginCall) { val id = longArg(call, "id") ?: return call.reject("id é obrigatório"); val name = call.getString("name")?.trim().orEmpty(); if (name.isBlank()) return call.reject("Nome da lista é obrigatório"); Thread { val current = database.lists().find(id) ?: return@Thread call.reject("Lista não encontrada"); val ids = call.getArray("contactIds"); val contactIds = if (ids == null) database.lists().memberIds(id) else (0 until ids.length()).mapNotNull { ids.optLong(it, -1).takeIf { value -> value > 0 } }; database.lists().replaceMembers(ContactListEntity(id = id, name = name, description = call.getString("description"), parentListId = current.parentListId, createdAt = current.createdAt), contactIds); call.resolve(JSObject().apply { put("updated", true) }) }.start() }
+    @PluginMethod fun listContactsPaged(call: PluginCall) {
+        val query = call.getString("query")?.trim().orEmpty(); val limit = (call.getInt("limit") ?: 50).coerceIn(1, 200); val offset = (call.getInt("offset") ?: 0).coerceAtLeast(0)
+        Thread { val rows = database.contacts().page(query, limit, offset); call.resolve(JSObject().apply { put("contacts", org.json.JSONArray(rows.map(::contactJson))); put("total", database.contacts().count(query)); put("offset", offset); put("limit", limit) }) }.start()
+    }
+
+    @PluginMethod fun listContactsByList(call: PluginCall) {
+        val listId = longArg(call, "listId") ?: return call.reject("listId é obrigatório"); val query = call.getString("query")?.trim().orEmpty(); val limit = (call.getInt("limit") ?: 50).coerceIn(1, 200); val offset = (call.getInt("offset") ?: 0).coerceAtLeast(0)
+        Thread { val rows = database.contacts().pageByList(listId, query, limit, offset); call.resolve(JSObject().apply { put("contacts", org.json.JSONArray(rows.map(::contactJson))); put("total", database.contacts().countByList(listId, query)); put("eligible", database.contacts().countEligibleByList(listId)); put("offset", offset); put("limit", limit) }) }.start()
+    }
+
+    @PluginMethod fun listContactLists(call: PluginCall) { Thread { val lists = org.json.JSONArray(); database.lists().summaries().forEach { list -> lists.put(JSObject().apply { put("id", list.id); put("name", list.name); put("description", list.description); put("parentListId", list.parentListId); put("origin", list.origin); put("totalCount", list.totalCount); put("eligibleCount", list.eligibleCount); put("contactIds", org.json.JSONArray()) }) }; call.resolve(JSObject().apply { put("lists", lists) }) }.start() }
+    @PluginMethod fun createContactList(call: PluginCall) { val name = call.getString("name")?.trim().orEmpty(); if (name.isBlank()) return call.reject("Nome da lista é obrigatório"); Thread { val id = database.lists().insert(ContactListEntity(name = name, description = call.getString("description"), origin = call.getString("origin")?.trim()?.ifBlank { null })); val ids = call.getArray("contactIds"); if (ids != null) (0 until ids.length()).mapNotNull { ids.optLong(it, -1).takeIf { value -> value > 0 } }.distinct().forEach { database.lists().addMember(ContactListMembershipEntity(id, it)) }; call.resolve(JSObject().apply { put("id", id) }) }.start() }
+    @PluginMethod fun ensureDeviceContactsList(call: PluginCall) { val ids = jsonIds(call.getArray("contactIds")); val requestedId = longArg(call, "listId"); val createNew = call.getBoolean("createNew") ?: false; Thread { val existing = requestedId?.let { database.lists().find(it) } ?: database.lists().findByOrigin("DEVICE_CONTACTS"); val list = if (existing != null && !createNew) existing else database.lists().insert(ContactListEntity(name = call.getString("name")?.trim().orEmpty().ifBlank { "Agenda do celular" }, origin = "DEVICE_CONTACTS" )).let { database.lists().find(it)!! }; database.beginTransaction(); try { ids.distinct().forEach { database.lists().addMember(ContactListMembershipEntity(list.id, it)) }; database.setTransactionSuccessful(); call.resolve(JSObject().apply { put("id", list.id); put("created", existing == null || createNew); put("name", list.name) }) } finally { database.endTransaction() } }.start() }
+    @PluginMethod fun updateContactList(call: PluginCall) { val id = longArg(call, "id") ?: return call.reject("id é obrigatório"); val name = call.getString("name")?.trim().orEmpty(); if (name.isBlank()) return call.reject("Nome da lista é obrigatório"); Thread { val current = database.lists().find(id) ?: return@Thread call.reject("Lista não encontrada"); val ids = call.getArray("contactIds"); val contactIds = if (ids == null) database.lists().memberIds(id) else (0 until ids.length()).mapNotNull { ids.optLong(it, -1).takeIf { value -> value > 0 } }; database.lists().replaceMembers(ContactListEntity(id = id, name = name, description = call.getString("description"), parentListId = current.parentListId, origin = current.origin, createdAt = current.createdAt), contactIds); call.resolve(JSObject().apply { put("updated", true) }) }.start() }
     @PluginMethod fun deleteContactList(call: PluginCall) { val id = longArg(call, "id") ?: return call.reject("id é obrigatório"); Thread { database.lists().removeAllMembers(id); database.lists().delete(id); call.resolve(JSObject().apply { put("deleted", true) }) }.start() }
     @PluginMethod fun listTemplates(call: PluginCall) { Thread { val templates = org.json.JSONArray(); database.templates().all().forEach { t -> templates.put(JSObject().apply { put("id", t.id); put("name", t.name); put("body", t.body) }) }; call.resolve(JSObject().apply { put("templates", templates) }) }.start() }
     @PluginMethod fun saveTemplate(call: PluginCall) { val name = call.getString("name")?.trim().orEmpty(); val body = call.getString("body").orEmpty(); if (name.isBlank() || body.isBlank()) return call.reject("Nome e corpo do modelo são obrigatórios"); Thread { val id = longArg(call, "id"); if (id == null) database.templates().insert(MessageTemplateEntity(name = name, body = body)) else database.templates().update(MessageTemplateEntity(id = id, name = name, body = body)); call.resolve(JSObject().apply { put("saved", true) }) }.start() }
@@ -309,6 +322,53 @@ class SmsPlugin : Plugin() {
         val requestId = call.getString("requestId") ?: UUID.randomUUID().toString(); val destination = call.getString("destination")?.trim().orEmpty(); val body = call.getString("body").orEmpty(); val subscriptionId = call.getInt("subscriptionId") ?: return call.reject("subscriptionId é obrigatório"); val contactId = longArg(call, "contactId"); val campaignId = longArg(call, "campaignId")
         if (destination.isBlank() || body.isBlank()) return call.reject("destination e body são obrigatórios")
         Thread { try { if (!hasActiveSubscription(subscriptionId)) return@Thread call.reject("SIM selecionado não está ativo"); val campaign = campaignId?.let { database.campaigns().find(it) }; if (campaignId != null && campaign == null) return@Thread call.reject("Campanha não encontrada"); if (database.queue().byRequestId(requestId) != null) return@Thread call.reject("requestId duplicado"); if (campaignId != null && contactId == null) return@Thread call.reject("contactId é obrigatório para itens de campanha"); if (contactId != null) { val contact = database.contacts().find(contactId); if (contact == null || !SmsEligibility.isEligible(contact)) return@Thread call.reject("Contato não autorizado, descadastrado ou sem celular completo válido para SMS") }; if (!SmsEligibility.isCompleteMobile(destination)) return@Thread call.reject("Destino não possui celular completo válido para SMS"); val sms = context.getSystemService(SmsManager::class.java).createForSubscriptionId(subscriptionId); val partsExpected = sms.divideMessage(body).size; val id = database.queue().insert(QueueItemEntity(requestId = requestId, campaignId = campaignId, contactId = contactId, destination = destination, body = body, subscriptionId = subscriptionId, partsExpected = partsExpected, requestIntervalMs = campaign?.intervalMs)); if (id <= 0) return@Thread call.reject("Não foi possível persistir o item da fila"); call.resolve(JSObject().apply { put("queued", true); put("queueItemId", id); put("requestId", requestId); put("campaignId", campaignId); put("requestIntervalMs", campaign?.intervalMs) }) } catch (error: Exception) { call.reject("Falha ao adicionar contato à fila: ${error.message ?: "erro desconhecido"}", error) } }.start()
+    }
+
+    private fun renderCampaignBody(template: String, contact: ContactEntity): String = Regex("\\{([A-Za-z0-9_]+)\\}").replace(template) { match -> when (match.groupValues[1]) { "nome" -> contact.name; "telefone" -> contact.phone; "empresa" -> contact.company.orEmpty(); "cidade" -> contact.city.orEmpty(); "estado" -> contact.state.orEmpty(); else -> "" } }
+
+    @PluginMethod fun enqueueCampaign(call: PluginCall) {
+        val campaignId = longArg(call, "campaignId") ?: return call.reject("campaignId é obrigatório")
+        val subscriptionId = call.getInt("subscriptionId") ?: return call.reject("subscriptionId é obrigatório")
+        val listId = longArg(call, "listId")
+        val query = call.getString("query")?.trim().orEmpty()
+        val selectAll = call.getBoolean("selectAll") ?: false
+        val selectedIds = jsonIds(call.getArray("contactIds")).toSet()
+        val excludedIds = jsonIds(call.getArray("excludedIds")).toSet()
+        Thread {
+            try {
+                if (!hasActiveSubscription(subscriptionId)) return@Thread call.reject("SIM selecionado não está ativo")
+                val campaign = database.campaigns().find(campaignId) ?: return@Thread call.reject("Campanha não encontrada")
+                val sms = context.getSystemService(SmsManager::class.java).createForSubscriptionId(subscriptionId)
+                val candidates = mutableListOf<ContactEntity>()
+                if (!selectAll && selectedIds.isNotEmpty()) {
+                    candidates += database.contacts().findByIds(selectedIds.toList()).filter { it.authorized && !it.unsubscribed && it.phoneClassification == SmsEligibility.MOBILE_VALID }
+                } else {
+                    var offset = 0
+                    while (true) {
+                        val page = if (listId != null) database.contacts().eligiblePageByList(listId, query, 200, offset) else database.contacts().eligiblePage(query, 200, offset)
+                        if (page.isEmpty()) break
+                        candidates += page.filterNot { excludedIds.contains(it.id) }
+                        if (page.size < 200) break
+                        offset += page.size
+                    }
+                }
+                val limit = (call.getInt("batchSize") ?: campaign.batchSize ?: 0).coerceAtLeast(0)
+                val eligible = if (limit > 0) candidates.take(limit) else candidates
+                var queued = 0
+                database.beginTransaction()
+                try {
+                    eligible.forEach { contact ->
+                        val requestId = UUID.randomUUID().toString()
+                        val body = renderCampaignBody(call.getString("body").orEmpty(), contact)
+                        val parts = sms.divideMessage(body)
+                        val id = database.queue().insert(QueueItemEntity(requestId = requestId, campaignId = campaignId, contactId = contact.id, destination = contact.normalizedPhone, body = body, subscriptionId = subscriptionId, partsExpected = parts.size, requestIntervalMs = campaign.intervalMs))
+                        if (id > 0) queued++
+                    }
+                    database.setTransactionSuccessful()
+                } finally { database.endTransaction() }
+                call.resolve(JSObject().apply { put("queued", queued); put("eligible", candidates.size); put("ignored", candidates.size - eligible.size) })
+            } catch (error: Exception) { call.reject("Falha ao adicionar campanha à fila: ${error.message ?: "erro desconhecido"}", error) }
+        }.start()
     }
 
     @PluginMethod fun startQueue(call: PluginCall) {

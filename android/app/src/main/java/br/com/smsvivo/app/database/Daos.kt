@@ -21,6 +21,14 @@ interface ContactDao {
     @Query("UPDATE contacts SET authorized = :authorized, updatedAt = :now WHERE id IN (:ids) AND unsubscribed = 0") fun updateAuthorization(ids: List<Long>, authorized: Boolean, now: Long): Int
     @Query("UPDATE contacts SET phone = :phone, normalizedPhone = :normalizedPhone, phoneClassification = :phoneClassification, correctedAt = :correctedAt, updatedAt = :now WHERE id = :id") fun updateCorrectedPhone(id: Long, phone: String, normalizedPhone: String, phoneClassification: String, correctedAt: Long, now: Long): Int
     @Query("SELECT DISTINCT contactId FROM queue_items WHERE contactId IN (:ids) AND state IN ('PENDING', 'PROCESSING')") fun activeQueueContactIds(ids: List<Long>): List<Long>
+    @Query("SELECT * FROM contacts WHERE (:query = '' OR lower(name) LIKE '%' || lower(:query) || '%' OR lower(phone) LIKE '%' || lower(:query) || '%' OR lower(normalizedPhone) LIKE '%' || lower(:query) || '%' OR lower(COALESCE(company, '')) LIKE '%' || lower(:query) || '%') ORDER BY name COLLATE NOCASE, id LIMIT :limit OFFSET :offset") fun page(query: String, limit: Int, offset: Int): List<ContactEntity>
+    @Query("SELECT COUNT(*) FROM contacts WHERE (:query = '' OR lower(name) LIKE '%' || lower(:query) || '%' OR lower(phone) LIKE '%' || lower(:query) || '%' OR lower(normalizedPhone) LIKE '%' || lower(:query) || '%' OR lower(COALESCE(company, '')) LIKE '%' || lower(:query) || '%')") fun count(query: String): Int
+    @Query("SELECT c.* FROM contacts c INNER JOIN contact_list_memberships m ON m.contactId = c.id WHERE m.listId = :listId AND (:query = '' OR lower(c.name) LIKE '%' || lower(:query) || '%' OR lower(c.phone) LIKE '%' || lower(:query) || '%' OR lower(c.normalizedPhone) LIKE '%' || lower(:query) || '%' OR lower(COALESCE(c.company, '')) LIKE '%' || lower(:query) || '%') ORDER BY c.name COLLATE NOCASE, c.id LIMIT :limit OFFSET :offset") fun pageByList(listId: Long, query: String, limit: Int, offset: Int): List<ContactEntity>
+    @Query("SELECT COUNT(*) FROM contacts c INNER JOIN contact_list_memberships m ON m.contactId = c.id WHERE m.listId = :listId AND (:query = '' OR lower(c.name) LIKE '%' || lower(:query) || '%' OR lower(c.phone) LIKE '%' || lower(:query) || '%' OR lower(c.normalizedPhone) LIKE '%' || lower(:query) || '%' OR lower(COALESCE(c.company, '')) LIKE '%' || lower(:query) || '%')") fun countByList(listId: Long, query: String): Int
+    @Query("SELECT COUNT(*) FROM contacts WHERE authorized = 1 AND unsubscribed = 0 AND phoneClassification = 'MOBILE_VALID'") fun countEligible(): Int
+    @Query("SELECT COUNT(*) FROM contacts c INNER JOIN contact_list_memberships m ON m.contactId = c.id WHERE m.listId = :listId AND c.authorized = 1 AND c.unsubscribed = 0 AND c.phoneClassification = 'MOBILE_VALID'") fun countEligibleByList(listId: Long): Int
+    @Query("SELECT c.* FROM contacts c INNER JOIN contact_list_memberships m ON m.contactId = c.id WHERE m.listId = :listId AND c.authorized = 1 AND c.unsubscribed = 0 AND c.phoneClassification = 'MOBILE_VALID' AND (:query = '' OR lower(c.name) LIKE '%' || lower(:query) || '%' OR lower(c.phone) LIKE '%' || lower(:query) || '%' OR lower(c.normalizedPhone) LIKE '%' || lower(:query) || '%' OR lower(COALESCE(c.company, '')) LIKE '%' || lower(:query) || '%') ORDER BY c.name COLLATE NOCASE, c.id LIMIT :limit OFFSET :offset") fun eligiblePageByList(listId: Long, query: String, limit: Int, offset: Int): List<ContactEntity>
+    @Query("SELECT * FROM contacts c WHERE c.authorized = 1 AND c.unsubscribed = 0 AND c.phoneClassification = 'MOBILE_VALID' AND (:query = '' OR lower(c.name) LIKE '%' || lower(:query) || '%' OR lower(c.phone) LIKE '%' || lower(:query) || '%' OR lower(c.normalizedPhone) LIKE '%' || lower(:query) || '%' OR lower(COALESCE(c.company, '')) LIKE '%' || lower(:query) || '%') ORDER BY c.name COLLATE NOCASE, c.id LIMIT :limit OFFSET :offset") fun eligiblePage(query: String, limit: Int, offset: Int): List<ContactEntity>
 }
 
 @Dao
@@ -72,6 +80,7 @@ interface ListDao {
     @Update fun update(list: ContactListEntity)
     @Query("SELECT * FROM contact_lists ORDER BY name COLLATE NOCASE") fun all(): List<ContactListEntity>
     @Query("SELECT * FROM contact_lists WHERE id = :id LIMIT 1") fun find(id: Long): ContactListEntity?
+    @Query("SELECT * FROM contact_lists WHERE origin = :origin ORDER BY id LIMIT 1") fun findByOrigin(origin: String): ContactListEntity?
     @Query("DELETE FROM contact_lists WHERE id = :id") fun delete(id: Long)
     @Insert(onConflict = OnConflictStrategy.IGNORE) fun addMember(member: ContactListMembershipEntity)
     @Query("DELETE FROM contact_list_memberships WHERE listId = :listId AND contactId IN (:contactIds)") fun removeMembers(listId: Long, contactIds: List<Long>)
@@ -80,7 +89,10 @@ interface ListDao {
     @Transaction fun replaceMembers(list: ContactListEntity, contactIds: List<Long>) { update(list); removeAllMembers(list.id); contactIds.forEach { addMember(ContactListMembershipEntity(list.id, it)) } }
     @Query("SELECT contactId FROM contact_list_memberships WHERE listId = :listId") fun memberIds(listId: Long): List<Long>
     @Query("SELECT listId FROM contact_list_memberships WHERE contactId = :contactId") fun listIdsForContact(contactId: Long): List<Long>
+    @Query("SELECT l.id AS id, l.name AS name, l.description AS description, l.parentListId AS parentListId, l.origin AS origin, COUNT(m.contactId) AS totalCount, COALESCE(SUM(CASE WHEN c.authorized = 1 AND c.unsubscribed = 0 AND c.phoneClassification = 'MOBILE_VALID' THEN 1 ELSE 0 END), 0) AS eligibleCount FROM contact_lists l LEFT JOIN contact_list_memberships m ON m.listId = l.id LEFT JOIN contacts c ON c.id = m.contactId GROUP BY l.id ORDER BY l.name COLLATE NOCASE") fun summaries(): List<ContactListSummaryRow>
 }
+
+data class ContactListSummaryRow(val id: Long, val name: String, val description: String?, val parentListId: Long?, val origin: String?, val totalCount: Int, val eligibleCount: Int)
 
 @Dao
 interface TemplateDao {

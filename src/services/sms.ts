@@ -14,6 +14,8 @@ export interface SmsNativePlugin {
   send(options: { subscriptionId: number; destination: string; body: string; requestId: string }): Promise<{ accepted: boolean; requestId: string }>;
   addListener(eventName: 'smsResult', listenerFunc: (result: SmsResult) => void): Promise<{ remove: () => Promise<void> }>;
   listContacts(): Promise<{ contacts: ContactRecord[] }>;
+  listContactsPaged(options?: { query?: string; limit?: number; offset?: number }): Promise<{ contacts: ContactRecord[]; total: number; limit: number; offset: number }>;
+  listContactsByList(options: { listId: number; query?: string; limit?: number; offset?: number }): Promise<{ contacts: ContactRecord[]; total: number; eligible: number; limit: number; offset: number }>;
   upsertContact(contact: ContactUpsert): Promise<{ saved: boolean; id: number }>;
   authorizeContacts(options: { ids: number[]; authorized: boolean; source?: string }): Promise<{ updated: number }>;
   createImportLists(options: { name: string; contactIds: number[]; correctedIds?: number[]; incompleteIds?: number[]; invalidIds?: number[] }): Promise<{ id: number; sublistIds: number[] }>;
@@ -24,12 +26,14 @@ export interface SmsNativePlugin {
   listHistory(): Promise<{ results: SmsResult[] }>;
   listDiagnostics(): Promise<{ events: DiagnosticRecord[] }>;
   enqueue(options: { requestId: string; destination: string; body: string; subscriptionId: number; contactId?: number; campaignId?: number }): Promise<{ queued: boolean; queueItemId: number; requestId: string }>;
+  enqueueCampaign(options: { campaignId: number; subscriptionId: number; body: string; listId?: number; query?: string; selectAll?: boolean; contactIds?: number[]; excludedIds?: number[]; batchSize?: number }): Promise<{ queued: number; eligible: number; ignored: number }>;
   startQueue(options?: { operationId?: string; intervalMs?: number; batchSize?: number }): Promise<{ started: boolean; intervalMs?: number; batchSize?: number }>;
   pauseQueue(): Promise<{ paused: boolean }>;
   stopQueue(): Promise<{ stopped: boolean }>;
   resumeQueue(): Promise<{ resumed: boolean }>;
   listContactLists(): Promise<{ lists: ContactListRecord[] }>;
-  createContactList(options: { name: string; description?: string; contactIds?: number[] }): Promise<{ id: number }>;
+  createContactList(options: { name: string; description?: string; origin?: string; contactIds?: number[] }): Promise<{ id: number }>;
+  ensureDeviceContactsList(options: { contactIds: number[]; listId?: number; createNew?: boolean; name?: string }): Promise<{ id: number; created: boolean; name: string }>;
   updateContactList(options: { id: number; name: string; description?: string; contactIds?: number[] }): Promise<{ updated: boolean }>;
   deleteContactList(options: { id: number }): Promise<{ deleted: boolean }>;
   listTemplates(): Promise<{ templates: MessageTemplateRecord[] }>;
@@ -47,7 +51,7 @@ export type ContactUpsert = Partial<Pick<ContactRecord, 'id' | 'authorized' | 'u
 export interface ContactRecord { id: number; name: string; phone: string; normalizedPhone: string; originalPhone?: string; phoneClassification?: import('./contacts').PhoneClassification; correctedAt?: number; company?: string; city?: string; state?: string; customFieldsJson?: string; authorized: boolean; unsubscribed: boolean; }
 export interface QueueStats { pending: number; processing: number; sent: number; delivered: number; failed: number; unknown: number; cancelled: number; skipped: number; processed: number; total: number; elapsedMs: number; ratePerMinute: number; contacts: number; ineligiblePending?: number; pauseReason?: string; currentRequestId?: string; currentDestination?: string; currentCampaignId?: number; currentSmsRequestedAt?: number; currentRequestIntervalMs?: number; }
 export interface DeviceContactRecord { sourceId: string; contactId: number; name: string; phone: string; type?: number; }
-export interface ContactListRecord { id: number; name: string; description?: string; parentListId?: number; contactIds: number[]; }
+export interface ContactListRecord { id: number; name: string; description?: string; parentListId?: number; origin?: string; contactIds: number[]; totalCount?: number; eligibleCount?: number; }
 export interface MessageTemplateRecord { id: number; name: string; body: string; }
 export interface CampaignRecord { id: number; name: string; state: string; subscriptionId: number; listId?: number; createdAt: number; }
 export interface DiagnosticRecord { id: number; category: string; code?: number; message: string; createdAt: number; }
